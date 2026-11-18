@@ -1,0 +1,45 @@
+# Render Blueprint for the API (free plan). Frontend goes to Vercel, database to Supabase.
+# Render → New → Blueprint → pick this repo. Values marked `sync: false` are asked for once.
+services:
+  - type: web
+    name: docuextract-api
+    runtime: docker
+    plan: free # sleeps after ~15 min idle; the frontend shows a "waking up" message
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      # Origin lock: copy this generated value into Vercel as ORIGIN_SECRET. The API then
+      # refuses any request that did not come through Vercel, so it can trust x-real-ip.
+      - key: ORIGIN_SECRET
+        generateValue: true
+      - key: CLIENT_IP_HEADER
+        value: x-real-ip
+      - key: DATABASE_URL # Supabase → Connect → Session pooler (port 5432)
+        sync: false
+      - key: APP_URL # your Vercel URL, used in password-reset emails
+        sync: false
+      - key: CORS_ORIGINS # JSON list, e.g. ["https://your-app.vercel.app"]
+        sync: false
+      # Optional: leave empty to run the public demo with the free offline extractor.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Hard daily caps on Gemini calls (retries count). Keep them low for a public demo.
+      - key: AI_DAILY_LIMIT_PER_USER
+        value: "10"
+      - key: AI_DAILY_LIMIT_GLOBAL
+        value: "100"
+      # Optional SMTP for password reset; without it, reset is disabled in production.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false

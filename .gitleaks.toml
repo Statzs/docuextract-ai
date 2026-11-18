@@ -1,0 +1,8 @@
+# Secret scanning config for CI (gitleaks). Default rules, plus one allowlisted path:
+# backend/tests holds fake passwords and a deliberately forged token used to test rejection.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures, not credentials"
+paths = ['''backend/tests/''']

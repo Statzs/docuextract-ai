@@ -1,0 +1,24 @@
+# dependencies / envs
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+# build & test output
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+.pytest_cache/
+.ruff_cache/
+*.tsbuildinfo
+# local data & secrets
+*.db
+*.db-journal
+.env
+.env.*
+!.env.example
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+.claude/
+docs/.video/
