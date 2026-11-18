@@ -32,7 +32,8 @@ class Settings(BaseSettings):
 
     # Behind a reverse proxy (Vercel): a shared secret the proxy adds to every request as
     # `X-Origin-Secret`. When set, requests without it are refused, so nobody can bypass the
-    # proxy and forge client-IP headers. CLIENT_IP_HEADER (e.g. x-real-ip) is then trusted.
+    # proxy and forge client-IP headers. CLIENT_IP_HEADER (x-forwarded-for behind Vercel)
+    # is then trusted.
     origin_secret: str = ""
     client_ip_header: str = ""
 

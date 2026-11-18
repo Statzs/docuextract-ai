@@ -10,7 +10,7 @@ export clean CSV, Excel or JSON.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-58%20backend%20·%2012%20unit%20·%209%20E2E-success)
+![Tests](https://img.shields.io/badge/tests-59%20backend%20·%2012%20unit%20·%209%20E2E-success)
 
 ![Demo: sample upload, review, validate](docs/demo.gif)
 
@@ -23,8 +23,10 @@ export clean CSV, Excel or JSON.
 
 ## Try it in 30 seconds
 
-Open the live demo (link added after deployment), or locally go to `/demo`, or click
-**Explore the demo — no signup** on the sign-in page. Nothing to install, no account, no key. You get a private, throwaway
+**Live demo: [docuextract-ai-three.vercel.app/demo](https://docuextract-ai-three.vercel.app/demo)** — one click opens a
+fresh workspace. Or click **Explore the demo — no signup** on the sign-in page.
+The API runs on a free instance that sleeps when idle, so the first visit can take up to a
+minute to wake it. Nothing to install, no account, no key. You get a private, throwaway
 workspace with six fictional documents and a short guided tour:
 
 1. open an extraction and compare it with the original,
@@ -153,12 +155,12 @@ Open http://localhost:5173 and click **Explore the demo**, or create an account.
 ## Tests
 
 ```bash
-cd backend  && uv run pytest -q                 # 58 unit + integration tests
+cd backend  && uv run pytest -q                 # 59 unit + integration tests
 cd frontend && npm test                         # 12 unit/component tests
 cd frontend && npx playwright install chromium && npm run test:e2e   # 9 E2E + accessibility tests
 ```
 
-Last local run (2026-11-18): **58/58** backend on SQLite and on PostgreSQL 17,
+Last local run (2026-11-18): **59/59** backend on SQLite and on PostgreSQL 17,
 **12/12** frontend unit, **9/9** Playwright, type-check, lint and production build all
 passing.
 
@@ -225,11 +227,20 @@ docs/
 - Supabase-style RLS lock-down: the table owner sees rows, a non-owner role sees none.
 - Every screen reviewed by eye in light and dark mode at desktop and phone widths.
 
-**Not verified:** the Docker image build (Docker was not available in the development
-environment), the GitHub Actions workflow (it has not run on GitHub yet), a live
-Supabase/Render/Vercel deployment (including Vercel's origin-secret header and the
-`x-real-ip` value it sends), and password-reset email delivery through a real SMTP server
-(the flow is covered by tests with a fake mailer).
+**Verified on the live deployment** (Supabase + Render + Vercel, free tiers):
+- GitHub Actions: all five CI jobs pass on GitHub.
+- The Docker image builds and runs on Render; migrations ran against Supabase on startup.
+- Demo flow end to end at desktop and phone width: one-click workspace, sample
+  extraction, validation, CSV export.
+- Origin lock: the Render host answers `/api/health` but returns 403 for every other path
+  without the secret, including with a guessed secret; through Vercel the API works.
+- Client IPs: Render logs show the visitor's real IP, also when the request carries
+  forged `X-Forwarded-For` / `X-Real-IP` headers.
+- The session cookie is HttpOnly; no Gemini key is configured, so the demo has no AI cost.
+
+**Not verified:** password-reset email delivery through a real SMTP server (the flow is
+covered by tests with a fake mailer; without SMTP, reset is hidden in production), and
+real Gemini extraction on the deployed instance (no key is set there on purpose).
 
 ## Known limitations
 

@@ -15,11 +15,12 @@ services:
       - key: JWT_SECRET
         generateValue: true
       # Origin lock: copy this generated value into Vercel as ORIGIN_SECRET. The API then
-      # refuses any request that did not come through Vercel, so it can trust x-real-ip.
+      # refuses any request that did not come through Vercel, so it can trust the client IP Vercel puts first in
+      # X-Forwarded-For. (Render's proxy rewrites x-real-ip, so that header is not usable here.)
       - key: ORIGIN_SECRET
         generateValue: true
       - key: CLIENT_IP_HEADER
-        value: x-real-ip
+        value: x-forwarded-for
       - key: DATABASE_URL # Supabase → Connect → Session pooler (port 5432)
         sync: false
       - key: APP_URL # your Vercel URL, used in password-reset emails

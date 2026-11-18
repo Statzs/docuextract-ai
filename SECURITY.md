@@ -36,8 +36,10 @@ These are documented trade-offs, not oversights:
 
 - Rate limiting is in memory and per process, so it resets on restart and is not shared
   between instances.
-- The client IP behind Vercel comes from the `x-real-ip` header Vercel sets. This is
-  trusted only because the origin lock guarantees every request passed through Vercel.
+- The client IP behind Vercel is the first entry of `X-Forwarded-For`, which Vercel
+  overwrites with the visitor's address (client-sent values are discarded; verified on the
+  live deployment with forged headers). It is trusted only because the origin lock
+  guarantees every request passed through Vercel.
 - Session tokens are not stored server-side; logout clears the cookie, and a password
   reset revokes all sessions, but a stolen token is otherwise valid until it expires (12 h).
 - Uploaded PDFs are parsed in the API process by `pypdf`, bounded by size and page limits.

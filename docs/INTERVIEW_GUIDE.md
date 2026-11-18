@@ -216,8 +216,10 @@ calling the API host directly could invent a new IP per request and never hit a 
 **The fix, in two layers** (`backend/app/security.py`, `backend/app/main.py`):
 1. **Origin lock.** Vercel attaches a secret header to every proxied request (a route
    transform reading an environment variable). The API refuses anything without it, using
-   `hmac.compare_digest`. With direct access closed, the `x-real-ip` header that Vercel
-   sets can be trusted, and only then is it used.
+   `hmac.compare_digest`. With direct access closed, the first `X-Forwarded-For` entry,
+   which Vercel overwrites with the visitor IP, can be trusted, and only then is it used.
+   (First attempt used `x-real-ip`; the live logs showed `127.0.0.1` for everyone because
+   Render's proxy rewrites that header. Checking production logs caught it.)
 2. **Keys an attacker can't rotate.** Sign-in attempts are limited per *target account*,
    reset requests per *email*, uploads per *user*, and new accounts and demo workspaces
    by a *global* hourly cap. These hold even if the IP is wrong.

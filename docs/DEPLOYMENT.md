@@ -115,7 +115,9 @@ Save; Render redeploys automatically.
    own public IP** (compare with a "what is my IP" site). Try once more from your phone on
    mobile data: the IP should differ. If every request shows the same IP, or an IP that
    isn't yours, tell me. It means the per-IP rate limits would treat all visitors as one,
-   and the client-IP header needs changing.
+   and the client-IP header needs changing. (Verified on the reference deployment:
+   with `CLIENT_IP_HEADER=x-forwarded-for` the log shows the real IP even when the request
+   carries forged `X-Forwarded-For`/`X-Real-IP` headers.)
 4. Optional: sign up with a real email and sign in again.
 
 When it all works, share `https://<your-vercel-url>/demo`: that link creates a fresh demo

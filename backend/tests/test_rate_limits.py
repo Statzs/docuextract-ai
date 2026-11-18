@@ -44,6 +44,15 @@ def test_client_ip_header_is_used_behind_origin_lock(monkeypatch):
     assert security.client_ip(_request({})) == "10.0.0.1"
 
 
+def test_forwarded_for_uses_first_hop_behind_origin_lock(monkeypatch):
+    # Production setup: Vercel overwrites X-Forwarded-For with the visitor IP, Render appends.
+    s = get_settings()
+    monkeypatch.setattr(s, "client_ip_header", "x-forwarded-for")
+    monkeypatch.setattr(s, "origin_secret", SECRET)
+    req = _request({"x-forwarded-for": "203.0.113.7, 76.76.21.9"})
+    assert security.client_ip(req) == "203.0.113.7"
+
+
 def test_origin_lock_rejects_requests_that_bypass_the_proxy(monkeypatch):
     monkeypatch.setattr(get_settings(), "origin_secret", SECRET)
     c = TestClient(app)
