@@ -12,7 +12,7 @@
     },
     {
       "src": "/api/(.*)",
-      "dest": "https://YOUR-BACKEND-HOST/api/$1",
+      "dest": "https://docuextract-api-6l9o.onrender.com/api/$1",
       "transforms": [
         {
           "type": "request.headers",
