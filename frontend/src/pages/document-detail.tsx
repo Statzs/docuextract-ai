@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { AnimatePresence, motion } from "motion/react"
-import { AlertTriangle, ArrowLeft, Check, Info, Loader2, RotateCw, Save, Sparkles, Trash2, Undo2 } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, Info, Loader2, Repeat, RotateCw, Save, Sparkles, Trash2, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ConfidenceMeter, ErrorState, StatusBadge } from "@/components/common"
+import { ConfidenceMeter, ErrorState, MethodBadge, StatusBadge } from "@/components/common"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ExportMenu } from "@/components/export-menu"
-import { api, ApiError, type DocumentDetail, type FieldDef, type FieldValue } from "@/lib/api"
-import { useDeleteDocument, useDocument, useRetry, useReview } from "@/lib/queries"
+import { ModeChooser, TypeChooser } from "@/components/extract-options"
+import { api, ApiError, type DocumentDetail, type ExtractMode, type FieldDef, type FieldValue } from "@/lib/api"
+import { useAiStatus, useDeleteDocument, useDocument, useExtract, useRetry, useReview, useSchemas } from "@/lib/queries"
 import { formatBytes, formatDate, parseInput, timeAgo, toInput } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -82,6 +83,72 @@ function Preview({ doc }: { doc: DocumentDetail }) {
   )
 }
 
+/** Pick (or change) the document type and start extraction. */
+function ExtractPanel({ doc, onDone, onCancel }: { doc: DocumentDetail; onDone?: () => void; onCancel?: () => void }) {
+  const { data: schemas = [] } = useSchemas()
+  const { data: aiStatus } = useAiStatus()
+  const extract = useExtract()
+  const [schemaId, setSchemaId] = useState<string | null>(doc.suggested_schema_id ?? doc.schema_id)
+  const [mode, setMode] = useState<ExtractMode>(doc.mode ?? "auto")
+  async function go() {
+    if (!schemaId) return
+    try {
+      await extract.mutateAsync({ id: doc.id, schemaId, mode })
+      onDone?.()
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
+  }
+  return (
+    <div className="space-y-4 p-5">
+      <div>
+        <h3 className="text-sm font-medium">What kind of document is it?</h3>
+        <p className="text-xs text-muted-foreground">It decides which information we look for.</p>
+      </div>
+      <TypeChooser schemas={schemas} value={schemaId} suggested={doc.suggested_schema_id} onChange={setSchemaId} />
+      <ModeChooser status={aiStatus} value={mode} onChange={setMode} />
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+        <Button onClick={go} disabled={!schemaId || extract.isPending}>
+          {extract.isPending && <Loader2 className="animate-spin" />} Extract information
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const PROGRESS = ["Uploaded", "Reading the document", "Finding the information", "Ready to review"]
+
+function Progress({ doc }: { doc: DocumentDetail }) {
+  // Two real states from the server (queued, processing); the last step lights up on completion.
+  const current = doc.status === "queued" ? 1 : 2
+  return (
+    <ol className="space-y-3" role="status" aria-live="polite">
+      {PROGRESS.map((label, i) => (
+        <li key={label} className="flex items-center gap-3 text-sm">
+          <span
+            className={cn(
+              "grid size-6 shrink-0 place-items-center rounded-full border text-xs",
+              i < current && "border-success/40 bg-success/10 text-success",
+              i === current && "border-foreground/30",
+            )}
+          >
+            {i < current ? <Check className="size-3.5" /> : i === current ? <Loader2 className="size-3.5 animate-spin" /> : i + 1}
+          </span>
+          <span className={cn(i > current && "text-muted-foreground", i === current && "font-medium")}>{label}</span>
+        </li>
+      ))}
+      <li className="pt-1 text-xs text-muted-foreground">
+        Usually a few seconds. Scanned pages and photos take longer (up to a minute) because the text has to be recognised first.
+      </li>
+    </ol>
+  )
+}
+
 export function DocumentDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
@@ -93,6 +160,7 @@ export function DocumentDetailPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmRerun, setConfirmRerun] = useState(false)
+  const [changingType, setChangingType] = useState(false)
 
   const original = useMemo(() => (doc ? currentValues(doc) : {}), [doc])
   // Reset the form whenever the server copy changes (load, re-extraction, save).
@@ -147,21 +215,29 @@ export function DocumentDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="truncate text-xl font-semibold tracking-tight">{doc.filename}</h1>
             <StatusBadge status={doc.status} />
+            {reviewable && <MethodBadge provider={doc.provider} />}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {doc.schema_name} · {formatBytes(doc.size_bytes)}
+            {doc.schema_name || "Type not chosen yet"} · {formatBytes(doc.size_bytes)}
             {doc.page_count ? ` · ${doc.page_count} ${doc.page_count === 1 ? "page" : "pages"}` : ""} · uploaded {formatDate(doc.created_at)}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button
-            variant="outline"
-            // Re-running replaces the AI output and drops human edits, so ask first when there are any.
-            onClick={() => (doc.reviewed_data || doc.status === "validated" ? setConfirmRerun(true) : retry.mutate(doc.id))}
-            disabled={!reviewable && doc.status !== "failed"}>
-            <RotateCw /> Re-run
-          </Button>
-          <ExportMenu ids={[doc.id]} disabled={!reviewable} />
+          {(reviewable || doc.status === "failed") && (
+            <>
+              <Button variant="outline" onClick={() => setChangingType(true)} disabled={changingType}>
+                <Repeat /> Change type
+              </Button>
+              <Button
+                variant="outline"
+                // Re-running replaces the extracted values and drops human edits, so ask first when there are any.
+                onClick={() => (doc.reviewed_data || doc.status === "validated" ? setConfirmRerun(true) : retry.mutate(doc.id))}
+              >
+                <RotateCw /> Read again
+              </Button>
+            </>
+          )}
+          <ExportMenu ids={[doc.id]} label="Download" disabled={!reviewable} />
           <Button variant="ghost" size="icon" aria-label="Delete document" onClick={() => setConfirmDelete(true)}>
             <Trash2 />
           </Button>
@@ -175,11 +251,11 @@ export function DocumentDetailPage() {
           <div className="flex items-center justify-between gap-3 border-b px-5 py-3.5">
             <div>
               <h2 id="fields-title" className="text-sm font-medium">
-                Extracted fields
+                {doc.status === "uploaded" ? "Extract information" : "Extracted information"}
               </h2>
               {reviewable && (
                 <p className="text-xs text-muted-foreground">
-                  {found} of {doc.schema_snapshot.length} found · {doc.provider === "demo" ? "offline demo extractor" : doc.model}
+                  {found} of {doc.schema_snapshot.length} found · check each value against the document, then validate
                 </p>
               )}
             </div>
@@ -191,12 +267,19 @@ export function DocumentDetailPage() {
           </div>
 
           <AnimatePresence mode="wait">
-            {(doc.status === "queued" || doc.status === "processing") && (
+            {(doc.status === "uploaded" || changingType) && (
+              <motion.div key="extract" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <ExtractPanel
+                  doc={doc}
+                  onDone={() => setChangingType(false)}
+                  onCancel={changingType ? () => setChangingType(false) : undefined}
+                />
+              </motion.div>
+            )}
+
+            {!changingType && (doc.status === "queued" || doc.status === "processing") && (
               <motion.div key="processing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5 p-5">
-                <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-                  <Loader2 className="size-4 animate-spin" />
-                  {doc.status === "queued" ? "Queued for extraction…" : "Reading the document…"}
-                </p>
+                <Progress doc={doc} />
                 {doc.schema_snapshot.map((f, i) => (
                   <div key={f.key} className="space-y-2">
                     <p className="text-xs text-muted-foreground">{f.label}</p>
@@ -208,22 +291,26 @@ export function DocumentDetailPage() {
               </motion.div>
             )}
 
-            {doc.status === "failed" && (
+            {!changingType && doc.status === "failed" && (
               <motion.div key="failed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-5">
                 <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
                   <p className="flex items-center gap-2 font-medium text-destructive">
                     <AlertTriangle className="size-4" /> Extraction failed
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">{doc.error}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Attempts: {doc.attempts}</p>
-                  <Button className="mt-4" size="sm" onClick={() => retry.mutate(doc.id)} disabled={retry.isPending}>
-                    <RotateCw /> Try again
-                  </Button>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => retry.mutate(doc.id)} disabled={retry.isPending}>
+                      <RotateCw /> Try again
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setChangingType(true)}>
+                      <Repeat /> Choose another type
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
             )}
 
-            {reviewable && (
+            {!changingType && reviewable && (
               <motion.form key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onSubmit={onSubmit} className="flex flex-col">
                 {doc.notes && (
                   <p className="mx-5 mt-4 flex gap-2 rounded-lg bg-info/10 px-3 py-2 text-xs text-info">
@@ -245,7 +332,6 @@ export function DocumentDetailPage() {
                                 *
                               </span>
                             )}
-                            <span className="ml-1 font-mono text-[10px] font-normal tracking-wide text-muted-foreground uppercase">{f.type}</span>
                           </Label>
                           <div className="flex items-center gap-2">
                             {edited && !dirty && <span className="text-[11px] whitespace-nowrap text-muted-foreground">edited</span>}
@@ -283,7 +369,7 @@ export function DocumentDetailPage() {
                         )}
                         {ai && ai.confidence > 0 && ai.confidence < 0.6 && !fieldErrors[f.key] && (
                           <p className="flex items-center gap-1 text-xs text-warning">
-                            <Sparkles className="size-3" /> Low confidence — please double-check.
+                            <Sparkles className="size-3" /> Not sure about this one — please check it.
                           </p>
                         )}
                       </div>
@@ -316,9 +402,9 @@ export function DocumentDetailPage() {
       <ConfirmDialog
         open={confirmRerun}
         onOpenChange={setConfirmRerun}
-        title="Re-run extraction?"
-        description="The document is read again from scratch. Your reviewed values and validation will be discarded."
-        confirmLabel="Re-run"
+        title="Read the document again?"
+        description="The document is read again from scratch. Your corrections and validation will be discarded."
+        confirmLabel="Read again"
         onConfirm={() => retry.mutate(doc.id)}
       />
     </div>

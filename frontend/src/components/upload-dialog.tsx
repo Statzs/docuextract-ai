@@ -2,49 +2,74 @@ import { useRef, useState, type DragEvent } from "react"
 import { useNavigate } from "react-router"
 import { AnimatePresence, motion } from "motion/react"
 import { useQuery } from "@tanstack/react-query"
-import { CheckCircle2, FileText, ImageIcon, Loader2, UploadCloud, X, XCircle } from "lucide-react"
+import { ArrowLeft, CheckCircle2, FileText, ImageIcon, Loader2, UploadCloud, X, XCircle } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useConfig, useSchemas, useUpload } from "@/lib/queries"
+import { ModeChooser, TypeChooser } from "@/components/extract-options"
+import { useAiStatus, useConfig, useExtract, useSchemas, useUpload } from "@/lib/queries"
 import { formatBytes } from "@/lib/format"
-import { api } from "@/lib/api"
+import { api, type DocumentDetail, type ExtractMode } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type Item = { id: string; file: File; state: "ready" | "uploading" | "done" | "error"; error?: string; docId?: string }
+type Item = {
+  id: string
+  file: File
+  state: "uploading" | "uploaded" | "error"
+  error?: string
+  doc?: DocumentDetail
+}
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp"
 const MIME_OK = ["application/pdf", "image/png", "image/jpeg", "image/webp"]
 
+/**
+ * The main flow, in plain steps: 1) pick a file (it uploads right away), 2) say what kind of
+ * document it is (pre-selected when the text makes it obvious), 3) Extract information.
+ */
 export function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { data: schemas = [] } = useSchemas()
   const { data: config } = useConfig()
+  const { data: aiStatus } = useAiStatus(open)
   const upload = useUpload()
+  const extract = useExtract()
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
-  const [schemaId, setSchemaId] = useState<string | null>(null)
   const [items, setItems] = useState<Item[]>([])
+  const [schemaId, setSchemaId] = useState<string | null>(null)
+  const [mode, setMode] = useState<ExtractMode>("auto")
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const { data: samples = [] } = useQuery({ queryKey: ["samples"], queryFn: api.samples, enabled: open, staleTime: Infinity })
 
   const maxMb = config?.max_upload_mb ?? 10
-  const selectedSchema = schemaId ?? schemas[0]?.id ?? null
+  const uploaded = items.filter((i) => i.state === "uploaded")
+  const uploading = items.some((i) => i.state === "uploading")
+  const step = items.length === 0 ? "file" : "type"
+  const suggested = uploaded.find((i) => i.doc?.suggested_schema_id)?.doc?.suggested_schema_id ?? null
 
-  function addFiles(files: FileList | null) {
-    if (!files) return
-    const next: Item[] = Array.from(files).map((file) => {
+  const patch = (id: string, p: Partial<Item>) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...p } : i)))
+
+  async function addFiles(files: File[]) {
+    const next: Item[] = files.slice(0, 10).map((file) => {
       // Client checks are for fast feedback only; the server re-validates by magic bytes.
       const error = !MIME_OK.includes(file.type)
-        ? "Unsupported type"
+        ? "Use a PDF, PNG, JPEG or WebP file."
         : file.size > maxMb * 1024 * 1024
-          ? `Larger than ${maxMb} MB`
+          ? `Larger than ${maxMb} MB.`
           : undefined
-      return { id: crypto.randomUUID(), file, state: error ? "error" : "ready", error }
+      return { id: crypto.randomUUID(), file, state: error ? "error" : "uploading", error }
     })
-    setItems((prev) => [...prev, ...next].slice(0, 20))
+    setItems((prev) => [...prev, ...next])
+    for (const item of next.filter((i) => i.state === "uploading")) {
+      try {
+        const doc = await upload.mutateAsync({ file: item.file })
+        patch(item.id, { state: "uploaded", doc })
+        if (doc.suggested_schema_id) setSchemaId((cur) => cur ?? doc.suggested_schema_id)
+      } catch (e) {
+        patch(item.id, { state: "error", error: (e as Error).message })
+      }
+    }
   }
 
   async function addSample(filename: string, schemaName: string) {
@@ -52,7 +77,7 @@ export function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       const file = await api.sampleFile(filename)
       const match = schemas.find((s) => s.name === schemaName)
       if (match) setSchemaId(match.id)
-      setItems([{ id: crypto.randomUUID(), file, state: "ready" }])
+      await addFiles([file])
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -61,170 +86,193 @@ export function UploadDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   function onDrop(e: DragEvent) {
     e.preventDefault()
     setDragging(false)
-    addFiles(e.dataTransfer.files)
+    addFiles(Array.from(e.dataTransfer.files))
   }
 
-  const patch = (id: string, p: Partial<Item>) => setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...p } : i)))
-
   async function start() {
-    if (!selectedSchema) return
+    if (!schemaId) return
     setBusy(true)
-    const ready = items.filter((i) => i.state === "ready")
-    let ok = 0
-    let lastDoc: string | undefined
-    for (const item of ready) {
-      patch(item.id, { state: "uploading" })
+    const opened: string[] = []
+    for (const item of uploaded) {
+      const doc = item.doc!
+      // An earlier copy that is already extracted is just opened, not processed again.
+      if (doc.duplicate && doc.status !== "uploaded" && doc.status !== "failed") {
+        opened.push(doc.id)
+        continue
+      }
       try {
-        const doc = await upload.mutateAsync({ file: item.file, schemaId: selectedSchema })
-        patch(item.id, { state: "done", docId: doc.id })
-        ok++
-        lastDoc = doc.id
+        await extract.mutateAsync({ id: doc.id, schemaId, mode })
+        opened.push(doc.id)
       } catch (e) {
         patch(item.id, { state: "error", error: (e as Error).message })
       }
     }
     setBusy(false)
-    if (ok) {
-      toast.success(ok === 1 ? "Document uploaded — extracting now" : `${ok} documents uploaded — extracting now`)
-      if (ok === ready.length) {
-        close()
-        navigate(ok === 1 && lastDoc ? `/app/documents/${lastDoc}` : "/app/documents")
-      }
-    }
+    if (!opened.length) return
+    if (uploaded.some((i) => i.doc?.duplicate)) toast.info("You had already uploaded this file, so we opened that copy.")
+    close()
+    navigate(opened.length === 1 ? `/app/documents/${opened[0]}` : "/app/documents")
   }
 
   function close() {
     onOpenChange(false)
-    setTimeout(() => setItems([]), 200)
+    setTimeout(() => {
+      setItems([])
+      setSchemaId(null)
+      setMode("auto")
+    }, 200)
   }
-
-  const readyCount = items.filter((i) => i.state === "ready").length
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : !busy && close())}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Upload documents</DialogTitle>
+          <DialogTitle>{step === "file" ? "Upload a document" : "What kind of document is it?"}</DialogTitle>
           <DialogDescription>
-            PDF, PNG, JPEG or WebP up to {maxMb} MB. Each file is extracted with the schema you choose.
+            {step === "file"
+              ? `PDF or photo (PNG, JPEG, WebP), up to ${maxMb} MB${config ? ` and ${config.max_pdf_pages} pages` : ""}.`
+              : "Pick the closest type. It decides which information we look for."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-2">
-          <Label htmlFor="schema-select">Extraction schema</Label>
-          <Select
-            items={schemas.map((s) => ({ value: s.id, label: s.name }))}
-            value={selectedSchema}
-            onValueChange={(v) => setSchemaId(v as string)}
-          >
-            <SelectTrigger id="schema-select" className="w-full">
-              <SelectValue placeholder="Choose a schema" />
-            </SelectTrigger>
-            <SelectContent>
-              {schemas.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                  <span className="ml-auto pl-3 text-xs text-muted-foreground">{s.fields.length} fields</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <Steps step={step} />
 
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setDragging(true)
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-          className={cn(
-            "group relative flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-9 text-center transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-            dragging ? "border-foreground/40 bg-highlight/10" : "hover:bg-muted/50",
-          )}
-        >
-          <motion.div animate={{ y: dragging ? -3 : 0 }} className="grid size-10 place-items-center rounded-lg border bg-card shadow-xs">
-            <UploadCloud className="size-5 text-muted-foreground" />
-          </motion.div>
-          <p className="text-sm">
-            <span className="font-medium">Drop files here</span> <span className="text-muted-foreground">or click to browse</span>
-          </p>
-          <input
-            ref={inputRef}
-            type="file"
-            accept={ACCEPT}
-            multiple
-            className="sr-only"
-            data-testid="file-input"
-            onChange={(e) => {
-              addFiles(e.target.files)
-              e.target.value = ""
-            }}
-          />
-        </button>
-
-        {items.length === 0 && samples.length > 0 && (
-          <div className="-mt-1">
-            <p className="mb-2 text-xs text-muted-foreground">No document handy? Try a fictional sample:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {samples.map((s) => (
-                <Button key={s.filename} variant="outline" size="xs" onClick={() => addSample(s.filename, s.schema)}>
-                  <FileText /> {s.filename.replace(/\.pdf$/, "")}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {items.length > 0 && (
-          <ul className="-mx-1 max-h-56 space-y-1 overflow-y-auto px-1">
-            <AnimatePresence initial={false}>
-              {items.map((i) => (
-                <motion.li
-                  key={i.id}
-                  layout
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm"
-                >
-                  {i.file.type.startsWith("image/") ? (
-                    <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate">{i.file.name}</p>
-                    <p className={cn("text-xs", i.error ? "text-destructive" : "text-muted-foreground")}>
-                      {i.error ?? formatBytes(i.file.size)}
-                    </p>
-                  </div>
-                  {i.state === "uploading" && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-                  {i.state === "done" && <CheckCircle2 className="size-4 text-success" />}
-                  {i.state === "error" && <XCircle className="size-4 text-destructive" />}
-                  {i.state === "ready" && (
-                    <Button variant="ghost" size="icon-xs" aria-label={`Remove ${i.file.name}`} onClick={() => setItems((p) => p.filter((x) => x.id !== i.id))}>
-                      <X />
+        {step === "file" ? (
+          <>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDragging(true)
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={cn(
+                "group relative flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                dragging ? "border-foreground/40 bg-highlight/10" : "hover:bg-muted/50",
+              )}
+            >
+              <motion.div animate={{ y: dragging ? -3 : 0 }} className="grid size-11 place-items-center rounded-lg border bg-card shadow-xs">
+                <UploadCloud className="size-5 text-muted-foreground" />
+              </motion.div>
+              <p className="text-sm">
+                <span className="font-medium">Drop a file here</span> <span className="text-muted-foreground">or tap to choose one</span>
+              </p>
+              <input
+                ref={inputRef}
+                type="file"
+                accept={ACCEPT}
+                multiple
+                className="sr-only"
+                data-testid="file-input"
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files ?? []))
+                  e.target.value = ""
+                }}
+              />
+            </button>
+            {samples.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs text-muted-foreground">No document handy? Try a fictional example:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {samples.map((s) => (
+                    <Button key={s.filename} variant="outline" size="xs" onClick={() => addSample(s.filename, s.schema)}>
+                      {s.filename.endsWith(".pdf") ? <FileText /> : <ImageIcon />} {s.filename.replace(/\.(pdf|png)$/, "")}
                     </Button>
-                  )}
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <ul className="space-y-1">
+              <AnimatePresence initial={false}>
+                {items.map((i) => (
+                  <motion.li
+                    key={i.id}
+                    layout
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm"
+                  >
+                    {i.file.type.startsWith("image/") ? (
+                      <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate">{i.file.name}</p>
+                      <p className={cn("text-xs", i.error ? "text-destructive" : "text-muted-foreground")}>
+                        {i.error ?? (i.state === "uploading" ? "Uploading…" : i.doc?.duplicate ? "Already uploaded before" : formatBytes(i.file.size))}
+                      </p>
+                    </div>
+                    {i.state === "uploading" && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Uploading" />}
+                    {i.state === "uploaded" && <CheckCircle2 className="size-4 text-success" aria-label="Uploaded" />}
+                    {i.state === "error" && (
+                      <>
+                        <XCircle className="size-4 text-destructive" aria-hidden />
+                        <Button variant="ghost" size="icon-xs" aria-label={`Remove ${i.file.name}`} onClick={() => setItems((p) => p.filter((x) => x.id !== i.id))}>
+                          <X />
+                        </Button>
+                      </>
+                    )}
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+
+            {uploaded.length > 0 && (
+              <>
+                <TypeChooser schemas={schemas} value={schemaId} suggested={suggested} onChange={setSchemaId} onNavigate={close} />
+                <ModeChooser status={aiStatus} value={mode} onChange={setMode} />
+              </>
+            )}
+          </>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="gap-2">
+          {step === "type" && !busy && (
+            <Button variant="ghost" className="sm:mr-auto" onClick={() => setItems([])} disabled={uploading}>
+              <ArrowLeft /> Other file
+            </Button>
+          )}
           <Button variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={start} disabled={!readyCount || !selectedSchema || busy}>
-            {busy && <Loader2 className="animate-spin" />}
-            {readyCount > 1 ? `Extract ${readyCount} files` : "Extract"}
-          </Button>
+          {step === "type" && (
+            <Button onClick={start} disabled={!uploaded.length || !schemaId || busy || uploading}>
+              {busy && <Loader2 className="animate-spin" />}
+              Extract information
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function Steps({ step }: { step: "file" | "type" }) {
+  const steps = ["Upload", "Choose type", "Review & download"]
+  const current = step === "file" ? 0 : 1
+  return (
+    <ol className="flex items-center gap-2 text-xs" aria-label="Progress">
+      {steps.map((s, i) => (
+        <li key={s} className="flex items-center gap-2" aria-current={i === current ? "step" : undefined}>
+          <span
+            className={cn(
+              "grid size-5 place-items-center rounded-full font-mono text-[11px]",
+              i < current ? "bg-success/15 text-success" : i === current ? "bg-highlight font-semibold text-highlight-foreground" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {i + 1}
+          </span>
+          <span className={cn(i === current ? "font-medium" : "hidden text-muted-foreground sm:inline")}>{s}</span>
+          {i < steps.length - 1 && <span className="h-px w-4 bg-border sm:w-6" aria-hidden />}
+        </li>
+      ))}
+    </ol>
   )
 }

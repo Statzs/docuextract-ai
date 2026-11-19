@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router"
+import { Link, useNavigate, useSearchParams } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { motion } from "motion/react"
 import { ArrowRight, Loader2, Sparkles } from "lucide-react"
@@ -76,21 +76,50 @@ function Showcase() {
           </motion.div>
         </div>
         <p className="mt-10 max-w-sm text-sm text-muted-foreground">
-          Define the fields you need, let Gemini read the document, then review every value side by side with the
-          original before exporting.
+          Upload an invoice, receipt or contract, choose its type, and get the key information as a spreadsheet. You check
+          every value next to the original before downloading.
         </p>
       </div>
     </div>
   )
 }
 
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
+      <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
+      <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6h-4a12 12 0 0 0 0 10.8l4-3.1z" />
+      <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c1-2.9 3.6-4.9 6.7-4.9z" />
+    </svg>
+  )
+}
+
+function GitHubMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4 fill-current" aria-hidden>
+      <path d="M12 .5a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A11.5 11.5 0 0 0 12 .5z" />
+    </svg>
+  )
+}
+
 export function AuthPage({ mode }: { mode: "login" | "register" }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const [pending, setPending] = useState<"form" | "demo" | null>(null)
-  const [error, setError] = useState<ApiError | null>(null)
+  const [error, setError] = useState<ApiError | null>(
+    params.get("error") === "oauth"
+      ? new ApiError(400, "We couldn't sign you in with that account. Make sure its email address is verified, or try another method.")
+      : null,
+  )
   const isLogin = mode === "login"
-  const resetEnabled = useConfig().data?.password_reset_enabled
+  const { data: config } = useConfig()
+  const resetEnabled = config?.password_reset_enabled
+  const oauth = [
+    ...(config?.google_enabled ? [{ id: "google" as const, label: "Continue with Google", icon: <GoogleMark /> }] : []),
+    ...(config?.github_enabled ? [{ id: "github" as const, label: "Continue with GitHub", icon: <GitHubMark /> }] : []),
+  ]
 
   function done(user: User) {
     qc.clear()
@@ -106,7 +135,11 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     setPending("form")
     setError(null)
     try {
-      done(isLogin ? await api.login(email, password) : await api.register(String(f.get("name")), email, password))
+      done(
+        isLogin
+          ? await api.login(email, password)
+          : await api.register(String(f.get("name")), email, password, String(f.get("website") ?? "")),
+      )
     } catch (err) {
       setError(err as ApiError)
     } finally {
@@ -131,26 +164,40 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
     <div className="grid min-h-dvh lg:grid-cols-[1fr_1.1fr]">
       <div className="flex flex-col px-6 py-6 sm:px-12">
         <div className="flex items-center justify-between">
-          <Logo />
+          <Link to="/" aria-label="DocuExtract AI home"><Logo /></Link>
           <ThemeToggle />
         </div>
         <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-12">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-            <h1 className="text-3xl font-semibold tracking-tight">{isLogin ? "Welcome back" : "Create your workspace"}</h1>
+            <h1 className="text-3xl font-semibold tracking-tight">{isLogin ? "Welcome back" : "Create your free account"}</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              {isLogin ? "Sign in to review and export your extractions." : "Start extracting structured data from documents."}
+              {isLogin ? "Sign in to see your documents." : "One click with Google or GitHub, or use your email."}
             </p>
 
-            <Button variant="outline" size="lg" className="mt-8 w-full" onClick={demo} disabled={pending !== null}>
-              {pending === "demo" ? <Loader2 className="animate-spin" /> : <Sparkles />}
-              Explore the demo — no signup
-            </Button>
+            <div className="mt-8 grid gap-2">
+              {oauth.map((o) => (
+                <Button key={o.id} size="lg" variant="outline" className="w-full" render={<a href={api.oauthUrl(o.id)} />} nativeButton={false}>
+                  {o.icon} {o.label}
+                </Button>
+              ))}
+              <Button variant={oauth.length ? "ghost" : "outline"} size="lg" className="w-full" onClick={demo} disabled={pending !== null}>
+                {pending === "demo" ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                Try the demo — no signup
+              </Button>
+            </div>
 
             <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
               <span className="h-px flex-1 bg-border" /> or with email <span className="h-px flex-1 bg-border" />
             </div>
 
             <form onSubmit={submit} className="grid gap-4" noValidate={false}>
+              {!isLogin && (
+                // Honeypot: hidden from people and screen readers; bots that fill every field are refused.
+                <div aria-hidden className="absolute -left-[9999px] h-px w-px overflow-hidden">
+                  <label htmlFor="website">Website</label>
+                  <input id="website" name="website" tabIndex={-1} autoComplete="off" />
+                </div>
+              )}
               {!isLogin && (
                 <div className="grid gap-1.5">
                   <Label htmlFor="name">Name</Label>

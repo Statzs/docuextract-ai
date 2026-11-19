@@ -2,10 +2,12 @@ import { useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { motion } from "motion/react"
-import { Activity, Braces, FileStack, LayoutGrid, LogOut, Menu, Plus, Sparkles } from "lucide-react"
+import { Activity, Braces, FileStack, Gauge, LayoutGrid, LogOut, Menu, Plus, Sparkles, UserX } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Logo } from "@/components/common"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ThemeToggle } from "@/components/theme"
 import { UploadDialog } from "@/components/upload-dialog"
 import { api, type User } from "@/lib/api"
@@ -13,16 +15,37 @@ import { useConfig } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 const NAV = [
-  { to: "/app", label: "Overview", icon: LayoutGrid, end: true },
-  { to: "/app/documents", label: "Documents", icon: FileStack },
-  { to: "/app/schemas", label: "Schemas", icon: Braces },
-  { to: "/app/usage", label: "API usage", icon: Activity },
+  { to: "/app", label: "Home", icon: LayoutGrid, end: true },
+  { to: "/app/documents", label: "My documents", icon: FileStack },
+]
+// Optional, for people who want to tune what gets extracted or watch consumption.
+const ADVANCED = [
+  { to: "/app/schemas", label: "Templates", icon: Braces },
+  { to: "/app/usage", label: "Usage", icon: Activity },
 ]
 
-function Nav({ onNavigate }: { onNavigate?: () => void }) {
+function Nav({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin: boolean }) {
+  const groups = [
+    { label: null, items: NAV },
+    { label: "Advanced", items: ADVANCED },
+    ...(isAdmin ? [{ label: "Owner", items: [{ to: "/app/admin", label: "Admin panel", icon: Gauge }] }] : []),
+  ]
   return (
-    <nav className="grid gap-0.5" aria-label="Main">
-      {NAV.map((n) => (
+    <nav className="grid gap-4" aria-label="Main">
+      {groups.map((g) => (
+        <div key={g.label ?? "main"} className="grid gap-0.5">
+          {g.label && <p className="px-2.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{g.label}</p>}
+          <NavItems items={g.items} onNavigate={onNavigate} />
+        </div>
+      ))}
+    </nav>
+  )
+}
+
+function NavItems({ items, onNavigate }: { items: { to: string; label: string; icon: typeof Gauge; end?: boolean }[]; onNavigate?: () => void }) {
+  return (
+    <>
+      {items.map((n) => (
         <NavLink
           key={n.to}
           to={n.to}
@@ -44,20 +67,31 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           )}
         </NavLink>
       ))}
-    </nav>
+    </>
   )
 }
 
 function UserFooter({ user }: { user: User }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   async function logout() {
     await api.logout().catch(() => undefined)
     qc.clear()
-    navigate("/login")
+    navigate("/")
+  }
+  async function deleteAccount() {
+    try {
+      await api.deleteAccount()
+      qc.clear()
+      toast.success("Your account and all its documents were deleted.")
+      navigate("/")
+    } catch (e) {
+      toast.error((e as Error).message)
+    }
   }
   return (
-    <div className="flex items-center gap-2 border-t border-sidebar-border pt-3">
+    <div className="flex items-center gap-1.5 border-t border-sidebar-border pt-3">
       <div className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-medium uppercase">
         {user.name.slice(0, 2)}
       </div>
@@ -66,9 +100,22 @@ function UserFooter({ user }: { user: User }) {
         <p className="truncate text-xs text-muted-foreground">{user.is_demo ? "Demo workspace" : user.email}</p>
       </div>
       <ThemeToggle />
+      {!user.is_demo && (
+        <Button variant="ghost" size="icon-sm" onClick={() => setConfirmDelete(true)} aria-label="Delete my account" title="Delete my account">
+          <UserX />
+        </Button>
+      )}
       <Button variant="ghost" size="icon-sm" onClick={logout} aria-label="Log out" title="Log out">
         <LogOut />
       </Button>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete your account?"
+        description="Your account, every uploaded file and all extracted data are permanently deleted. This cannot be undone."
+        confirmLabel="Delete everything"
+        onConfirm={deleteAccount}
+      />
     </div>
   )
 }
@@ -91,16 +138,19 @@ export function AppShell({ user }: { user: User }) {
           setUploadOpen(true)
         }}
       >
-        <Plus /> New extraction
+        <Plus /> Extract a document
       </Button>
-      <Nav onNavigate={onNavigate} />
+      <Nav onNavigate={onNavigate} isAdmin={user.is_admin} />
       <div className="mt-auto grid gap-3">
-        {config?.demo_mode && (
+        {(user.is_demo || config?.demo_mode) && (
           <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
             <p className="mb-1 flex items-center gap-1.5 font-medium text-foreground">
-              <Sparkles className="size-3.5 text-highlight-foreground dark:text-highlight" /> Offline demo mode
+              <Sparkles className="size-3.5 text-highlight-foreground dark:text-highlight" />
+              {user.is_demo ? "Demo workspace" : "Standard reading"}
             </p>
-            No Gemini key is configured, so extraction uses the built-in text matcher. Images need Gemini.
+            {user.is_demo
+              ? "Fictional documents, deleted after 24 hours. Demo extractions use text reading and OCR, never AI."
+              : "AI is not set up on this server: documents are read with text recognition and OCR."}
           </div>
         )}
         <UserFooter user={user} />
@@ -117,7 +167,7 @@ export function AppShell({ user }: { user: User }) {
           <Menu />
         </Button>
         <Logo />
-        <Button size="icon-sm" aria-label="New extraction" onClick={() => setUploadOpen(true)}>
+        <Button size="icon-sm" aria-label="Extract a document" onClick={() => setUploadOpen(true)}>
           <Plus />
         </Button>
       </header>

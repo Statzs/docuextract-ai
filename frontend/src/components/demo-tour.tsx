@@ -15,19 +15,23 @@ function readDismissed() {
 }
 
 /** A four-step "start here" card for demo visitors. Dismissal is a per-browser convenience. */
-export function DemoTour({ reviewDocId, onUpload }: { reviewDocId?: string; onUpload: () => void }) {
+export function DemoTour({ reviewDocId, photoDocId, onUpload }: { reviewDocId?: string; photoDocId?: string; onUpload: () => void }) {
   const [dismissed, setDismissed] = useState(readDismissed)
   if (dismissed) return null
 
   const steps = [
     {
-      title: "Review an extraction",
-      body: "Compare each value with the original and fix anything the model got wrong.",
+      title: "Check an extraction",
+      body: "Each value sits next to the original document. Fix anything that looks wrong.",
       action: reviewDocId ? { to: `/app/documents/${reviewDocId}`, label: "Open one" } : undefined,
     },
-    { title: "Extract a sample", body: "Upload one of the fictional PDFs and watch it get processed.", onClick: onUpload, label: "Upload" },
-    { title: "Shape the schema", body: "Fields, types and hints decide what gets extracted.", action: { to: "/app/schemas", label: "Edit schemas" } },
-    { title: "Export clean data", body: "Select documents and download CSV, Excel or JSON.", action: { to: "/app/documents", label: "Go to documents" } },
+    {
+      title: "Read a photo",
+      body: "A scanned receipt is waiting. Choose Receipt and watch OCR read it live.",
+      action: photoDocId ? { to: `/app/documents/${photoDocId}`, label: "Open the photo" } : undefined,
+    },
+    { title: "Upload an example", body: "Pick a fictional invoice, order or payment and extract it yourself.", onClick: onUpload, label: "Upload" },
+    { title: "Download the data", body: "Get Excel, CSV or JSON for one document or for all of them.", action: { to: "/app/documents", label: "My documents" } },
   ]
 
   function dismiss() {

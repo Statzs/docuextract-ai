@@ -265,14 +265,14 @@ def test_demo_workspace_is_seeded_and_isolated():
     assert a.post("/api/auth/demo").status_code == 201
     assert b.post("/api/auth/demo").status_code == 201
     docs = a.get("/api/documents").json()
-    assert docs["total"] == 9
+    assert docs["total"] == 7
     statuses = {d["status"] for d in docs["items"]}
     # The scanned image waits for the visitor to extract it live.
     assert statuses == {"needs_review", "validated", "uploaded"}
     assert a.get("/api/auth/me").json()["id"] != b.get("/api/auth/me").json()["id"]
     assert b.get(f"/api/documents/{docs['items'][0]['id']}").status_code == 404
     usage = a.get("/api/usage").json()
-    assert usage["total_requests"] == 8
+    assert usage["total_requests"] == 6
 
 
 def test_config_reports_demo_mode():

@@ -72,7 +72,7 @@ function SchemaEditor({ schema, open, onOpenChange }: { schema: ExtractionSchema
         id: schema?.id,
         data: { name: name.trim(), description: description.trim(), fields: fields.map(({ _id, _keyTouched, ...f }) => f) },
       })
-      toast.success(schema ? "Schema updated" : "Schema created")
+      toast.success(schema ? "Template updated" : "Template created")
       onOpenChange(false)
     } catch (err) {
       setError((err as ApiError).message)
@@ -84,16 +84,16 @@ function SchemaEditor({ schema, open, onOpenChange }: { schema: ExtractionSchema
       <SheetContent className="w-full gap-0 p-0 sm:max-w-xl data-[side=right]:sm:max-w-xl">
         <form onSubmit={submit} className="flex h-full flex-col">
           <SheetHeader className="border-b p-5">
-            <SheetTitle>{schema ? "Edit schema" : "New schema"}</SheetTitle>
+            <SheetTitle>{schema ? "Edit template" : "New template"}</SheetTitle>
             <SheetDescription>
-              Fields describe what to extract. Descriptions are sent to the model as hints. Existing documents keep the schema they were
-              processed with.
+              Fields are the pieces of information to look for. Descriptions help the AI understand each one. Documents already
+              extracted keep the fields they were read with.
             </SheetDescription>
           </SheetHeader>
           <div className="flex-1 space-y-5 overflow-y-auto p-5">
             <div className="grid gap-1.5">
               <Label htmlFor="schema-name">Name</Label>
-              <Input id="schema-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} placeholder="e.g. Purchase order" />
+              <Input id="schema-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} placeholder="e.g. Delivery note" />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="schema-desc">Description</Label>
@@ -187,7 +187,7 @@ function SchemaEditor({ schema, open, onOpenChange }: { schema: ExtractionSchema
               </Button>
               <Button type="submit" disabled={save.isPending}>
                 {save.isPending && <Loader2 className="animate-spin" />}
-                {schema ? "Save changes" : "Create schema"}
+                {schema ? "Save changes" : "Create template"}
               </Button>
             </div>
           </SheetFooter>
@@ -207,11 +207,11 @@ export function SchemasPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Schemas"
-        description="Define the exact fields to extract for each kind of document."
+        title="Templates"
+        description="Advanced: the list of fields looked for in each kind of document. Edit a built-in template or create your own for a custom extraction."
         actions={
           <Button onClick={openNew}>
-            <Plus /> New schema
+            <Plus /> New template
           </Button>
         }
       />
@@ -224,7 +224,7 @@ export function SchemasPage() {
           ))}
         </div>
       ) : !schemas?.length ? (
-        <EmptyState icon={Braces} title="No schemas yet" description="Create a schema to tell the extractor which fields to look for." action={<Button onClick={openNew}>Create a schema</Button>} />
+        <EmptyState icon={Braces} title="No templates yet" description="Create a template to tell the extractor which fields to look for." action={<Button onClick={openNew}>Create a template</Button>} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {schemas.map((s, i) => (
@@ -244,9 +244,11 @@ export function SchemasPage() {
                   <Button variant="ghost" size="icon-sm" aria-label={`Edit ${s.name}`} onClick={() => setEditing({ schema: s, n: Date.now() })}>
                     <Pencil />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" aria-label={`Delete ${s.name}`} onClick={() => setToDelete(s)}>
-                    <Trash2 />
-                  </Button>
+                  {!s.kind && (
+                    <Button variant="ghost" size="icon-sm" aria-label={`Delete ${s.name}`} onClick={() => setToDelete(s)}>
+                      <Trash2 />
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-1">
@@ -271,7 +273,7 @@ export function SchemasPage() {
         open={!!toDelete}
         onOpenChange={(o) => !o && setToDelete(null)}
         title={`Delete "${toDelete?.name}"?`}
-        description="Documents already processed with this schema keep their data. You won't be able to upload new documents with it."
+        description="Documents already extracted with this template keep their data."
         onConfirm={() => {
           if (toDelete) del.mutate(toDelete.id)
           setToDelete(null)

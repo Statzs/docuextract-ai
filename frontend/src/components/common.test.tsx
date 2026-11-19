@@ -10,5 +10,5 @@ it("renders an accessible status label", () => {
 it("shows confidence as a percentage", () => {
   render(<ConfidenceMeter value={0.934} />)
   expect(screen.getByText("93%")).toBeInTheDocument()
-  expect(screen.getByTitle("Model confidence 93%")).toBeInTheDocument()
+  expect(screen.getByTitle("Confidence 93%")).toBeInTheDocument()
 })

@@ -78,8 +78,8 @@ function NotFound() {
         <Logo className="mb-8" />
         <p className="font-mono text-sm text-muted-foreground">404</p>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">This page doesn't exist</h1>
-        <Button className="mt-6" render={<Link to="/app" />} nativeButton={false}>
-          Back to the app
+        <Button className="mt-6" render={<Link to="/" />} nativeButton={false}>
+          Back to the home page
         </Button>
       </div>
     </div>
@@ -87,7 +87,7 @@ function NotFound() {
 }
 
 const router = createBrowserRouter([
-  { path: "/", element: <Navigate to="/app" replace /> },
+  { path: "/", lazy: () => import("@/pages/landing").then((m) => ({ Component: m.LandingPage })) },
   {
     element: <GuestOnly />,
     children: [
@@ -108,6 +108,7 @@ const router = createBrowserRouter([
       { path: "documents/:id", lazy: () => import("@/pages/document-detail").then((m) => ({ Component: m.DocumentDetailPage })) },
       { path: "schemas", lazy: () => import("@/pages/schemas").then((m) => ({ Component: m.SchemasPage })) },
       { path: "usage", lazy: () => import("@/pages/usage").then((m) => ({ Component: m.UsagePage })) },
+      { path: "admin", lazy: () => import("@/pages/admin").then((m) => ({ Component: m.AdminPage })) },
     ],
   },
   { path: "/demo", element: <StartDemo /> },

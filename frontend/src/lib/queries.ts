@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { api, ApiError, type DocStatus, type FieldValue, type SchemaInput } from "@/lib/api"
+import { api, ApiError, type DocStatus, type ExtractMode, type FieldValue, type SchemaInput } from "@/lib/api"
 
 const ACTIVE: DocStatus[] = ["queued", "processing"]
 
@@ -11,6 +11,8 @@ export const keys = {
   documents: ["documents"] as const,
   document: (id: string) => ["documents", "detail", id] as const,
   usage: (days: number) => ["usage", days] as const,
+  aiStatus: ["ai-status"] as const,
+  admin: ["admin"] as const,
 }
 
 const toastError = (e: Error) => toast.error(e.message)
@@ -30,8 +32,10 @@ export function useMe() {
   })
 }
 
-export const useConfig = () => useQuery({ queryKey: keys.config, queryFn: api.config, staleTime: Infinity })
+export const useConfig = () => useQuery({ queryKey: keys.config, queryFn: api.config, staleTime: 5 * 60_000 })
 export const useSchemas = () => useQuery({ queryKey: keys.schemas, queryFn: api.schemas })
+export const useAiStatus = (enabled = true) =>
+  useQuery({ queryKey: keys.aiStatus, queryFn: api.aiStatus, enabled, staleTime: 30_000 })
 
 export function useDocuments(params: { q?: string; status?: string; page?: number; page_size?: number }) {
   return useQuery({
@@ -57,9 +61,23 @@ export const useUsage = (days: number) =>
 export function useUpload() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ file, schemaId }: { file: File; schemaId: string }) => api.upload(file, schemaId),
+    mutationFn: ({ file, schemaId, mode }: { file: File; schemaId?: string; mode?: ExtractMode }) =>
+      api.upload(file, schemaId, mode),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.documents })
+      qc.invalidateQueries({ queryKey: ["usage"] })
+    },
+  })
+}
+
+export function useExtract() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, schemaId, mode }: { id: string; schemaId: string; mode: ExtractMode }) => api.extract(id, schemaId, mode),
+    onSuccess: (doc) => {
+      qc.setQueryData(keys.document(doc.id), doc)
+      qc.invalidateQueries({ queryKey: keys.documents })
+      qc.invalidateQueries({ queryKey: keys.aiStatus })
       qc.invalidateQueries({ queryKey: ["usage"] })
     },
   })
@@ -117,7 +135,23 @@ export function useDeleteSchema() {
     mutationFn: api.deleteSchema,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: keys.schemas })
-      toast.success("Schema deleted")
+      toast.success("Template deleted")
+    },
+    onError: toastError,
+  })
+}
+
+export const useAdminOverview = () => useQuery({ queryKey: keys.admin, queryFn: api.adminOverview, refetchInterval: 30_000 })
+
+export function useAdminLimits() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.adminSetLimits,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.admin })
+      qc.invalidateQueries({ queryKey: keys.config })
+      qc.invalidateQueries({ queryKey: keys.aiStatus })
+      toast.success("Limits saved")
     },
     onError: toastError,
   })

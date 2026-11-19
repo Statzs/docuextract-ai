@@ -15,6 +15,8 @@ from app.services.exporter import final_values
 from app.services.files import validate_upload
 
 SAMPLES_DIR = Path(__file__).parent / "samples"
+# Not pre-loaded: left for the visitor to upload and extract themselves from the dialog.
+TRY_YOURSELF = {"purchase-order-northfield-5520.pdf", "payment-confirmation-tx-88213.pdf"}
 
 
 def create_default_schemas(db: Session, user: User) -> dict[str, ExtractionSchema]:
@@ -41,6 +43,8 @@ def create_demo_user(db: Session) -> User:
     extractor = StandardExtractor()  # always offline, never spends Gemini quota on demo data
     now = utcnow()
     for filename, schema_name, _title, _lines, days_ago, validate in SAMPLES:
+        if filename in TRY_YOURSELF:
+            continue
         data = (SAMPLES_DIR / filename).read_bytes()
         meta = validate_upload(data, filename)
         schema = schemas[schema_name]

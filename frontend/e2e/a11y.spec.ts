@@ -12,18 +12,18 @@ async function audit(page: Page, name: string) {
 for (const theme of ["light", "dark"] as const) {
   test(`no axe violations (${theme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-    for (const path of ["/login", "/register", "/forgot-password", "/reset-password?token=x"]) {
+    for (const path of ["/", "/login", "/register", "/forgot-password", "/reset-password?token=x"]) {
       await page.goto(path)
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
       await audit(page, path)
     }
 
     await page.goto("/login")
-    await page.getByRole("button", { name: /Explore the demo/ }).click()
+    await page.getByRole("button", { name: /Try the demo/ }).click()
     await expect(page.getByText("Recent documents")).toBeVisible()
     await audit(page, "dashboard")
 
-    await page.getByRole("link", { name: "Documents" }).click()
+    await page.getByRole("link", { name: "My documents" }).click()
     await expect(page.getByText("invoice-halden-roe-0142.pdf")).toBeVisible()
     await audit(page, "documents")
 
@@ -31,11 +31,11 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByLabel(/^Invoice Number/)).toBeVisible()
     await audit(page, "document detail")
 
-    await page.getByRole("link", { name: "Schemas" }).click()
+    await page.getByRole("link", { name: "Templates" }).click()
     await expect(page.getByRole("heading", { name: "Invoice" })).toBeVisible()
     await audit(page, "schemas")
 
-    await page.getByRole("link", { name: "API usage" }).click()
+    await page.getByRole("link", { name: "Usage" }).click()
     await expect(page.getByText("Success rate")).toBeVisible()
     await audit(page, "usage")
   })

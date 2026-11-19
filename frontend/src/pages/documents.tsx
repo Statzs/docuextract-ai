@@ -18,8 +18,9 @@ import { cn } from "@/lib/utils"
 
 const FILTERS: { id: string; label: string; status?: DocStatus[] }[] = [
   { id: "all", label: "All" },
-  { id: "review", label: "Needs review", status: ["needs_review"] },
-  { id: "validated", label: "Validated", status: ["validated"] },
+  { id: "review", label: "To check", status: ["needs_review"] },
+  { id: "validated", label: "Checked", status: ["validated"] },
+  { id: "waiting", label: "Waiting for a type", status: ["uploaded"] },
   { id: "active", label: "In progress", status: ["queued", "processing"] },
   { id: "failed", label: "Failed", status: ["failed"] },
 ]
@@ -68,11 +69,11 @@ export function DocumentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Documents"
-        description="Every document you have processed, with its extraction status."
+        title="My documents"
+        description="Everything you have uploaded. Open a document to check its values or download them."
         actions={
           <>
-            <ExportMenu ids={selected.size ? [...selected] : undefined} label={selected.size ? `Export ${selected.size}` : "Export all"} />
+            <ExportMenu ids={selected.size ? [...selected] : undefined} label={selected.size ? `Download ${selected.size}` : "Download all"} />
             <Button onClick={openUpload}>
               <Plus /> Upload
             </Button>
@@ -119,7 +120,7 @@ export function DocumentsPage() {
           <EmptyState
             icon={FileStack}
             title="Your document history is empty"
-            description="Uploaded documents appear here with their status, schema and extracted data."
+            description="Uploaded documents appear here with their status and extracted information."
             action={<Button onClick={openUpload}>Upload your first document</Button>}
           />
         )
@@ -133,7 +134,7 @@ export function DocumentsPage() {
                     <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all on this page" />
                   </TableHead>
                   <TableHead>File</TableHead>
-                  <TableHead className="hidden sm:table-cell">Schema</TableHead>
+                  <TableHead className="hidden sm:table-cell">Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden md:table-cell">Uploaded</TableHead>
                   <TableHead className="w-10" />
@@ -167,7 +168,7 @@ export function DocumentsPage() {
                             {d.page_count ? ` · ${d.page_count} ${d.page_count === 1 ? "page" : "pages"}` : ""}
                           </span>
                         </TableCell>
-                        <TableCell className="hidden text-muted-foreground sm:table-cell">{d.schema_name}</TableCell>
+                        <TableCell className="hidden text-muted-foreground sm:table-cell">{d.schema_name || "—"}</TableCell>
                         <TableCell>
                           <StatusBadge status={d.status} />
                         </TableCell>
@@ -181,10 +182,10 @@ export function DocumentsPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                disabled={d.status === "queued" || d.status === "processing"}
+                                disabled={d.status === "queued" || d.status === "processing" || d.status === "uploaded"}
                                 onClick={() => retry.mutate(d.id)}
                               >
-                                <RotateCw /> Re-run extraction
+                                <RotateCw /> Read again
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem variant="destructive" onClick={() => setToDelete(d)}>

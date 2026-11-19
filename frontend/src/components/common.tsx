@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { motion } from "motion/react"
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, Loader2, type LucideIcon } from "lucide-react"
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, FileUp, Loader2, ScanText, Sparkles, Type, type LucideIcon } from "lucide-react"
 import type { DocStatus } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 export function Logo({ className }: { className?: string }) {
   // A page whose middle line is "highlighted": the product in one glyph.
   return (
-    <span className={cn("inline-flex items-center gap-2 font-semibold tracking-tight", className)}>
+    <span className={cn("inline-flex shrink-0 items-center gap-2 font-semibold tracking-tight whitespace-nowrap", className)}>
       <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
         <rect x="4" y="2.5" width="16" height="19" rx="3" className="fill-foreground" />
         <rect x="7" y="7" width="8" height="1.6" rx=".8" className="fill-background/60" />
@@ -23,6 +23,7 @@ export function Logo({ className }: { className?: string }) {
 }
 
 const STATUS: Record<DocStatus, { label: string; icon: LucideIcon; className: string; spin?: boolean }> = {
+  uploaded: { label: "Not extracted", icon: FileUp, className: "text-muted-foreground bg-muted" },
   queued: { label: "Queued", icon: Clock3, className: "text-muted-foreground bg-muted" },
   processing: { label: "Processing", icon: Loader2, className: "text-info bg-info/10", spin: true },
   needs_review: { label: "Needs review", icon: CircleDashed, className: "text-warning bg-warning/12" },
@@ -49,11 +50,45 @@ export function StatusBadge({ status }: { status: DocStatus }) {
   )
 }
 
+const METHOD: Record<string, { label: string; hint: string; icon: LucideIcon; className: string }> = {
+  gemini: {
+    label: "Read by AI",
+    hint: "Values extracted by Google Gemini. Check them against the document.",
+    icon: Sparkles,
+    className: "text-info bg-info/10",
+  },
+  text: {
+    label: "Text reading",
+    hint: "Values read from the PDF's text by matching labels. No AI was used.",
+    icon: Type,
+    className: "text-foreground bg-muted",
+  },
+  ocr: {
+    label: "OCR",
+    hint: "Text recognised from the image with Tesseract OCR, then matched by labels. No AI was used.",
+    icon: ScanText,
+    className: "text-foreground bg-muted",
+  },
+}
+
+/** Says how the values were produced, so AI output is never confused with plain text reading. */
+export function MethodBadge({ provider }: { provider: string | null }) {
+  const m = METHOD[provider === "demo" ? "text" : (provider ?? "")]
+  if (!m) return null
+  return (
+    <span title={m.hint} className={cn("inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap", m.className)}>
+      <m.icon className="size-3.5" aria-hidden />
+      {m.label}
+      <span className="sr-only">. {m.hint}</span>
+    </span>
+  )
+}
+
 export function ConfidenceMeter({ value }: { value: number }) {
   const pct = Math.round(value * 100)
   const tone = value >= 0.8 ? "bg-success" : value >= 0.5 ? "bg-warning" : "bg-destructive"
   return (
-    <span className="inline-flex items-center gap-1.5" title={`Model confidence ${pct}%`}>
+    <span className="inline-flex items-center gap-1.5" title={`Confidence ${pct}%`}>
       <span className="relative h-1 w-10 overflow-hidden rounded-full bg-muted">
         <span className={cn("absolute inset-y-0 left-0 rounded-full", tone)} style={{ width: `${pct}%` }} />
       </span>
