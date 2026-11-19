@@ -22,6 +22,7 @@ class ExtractionResult:
     output_tokens: int = 0
     tokens_estimated: bool = False
     notes: list[str] = field(default_factory=list)
+    provider: str | None = None  # overrides the extractor's name (e.g. "ocr" vs "text")
 
 
 class Extractor(Protocol):

@@ -59,7 +59,14 @@ def init_db() -> None:
             # Created by `create_all` before migrations existed: record which revision it
             # matches so `upgrade` only adds what is missing.
             cols = {c["name"] for c in insp.get_columns("users")}
-            command.stamp(cfg, "0002" if "token_version" in cols else "0001")
+            rev = (
+                "0003"
+                if "email_verified" in cols
+                else "0002"
+                if "token_version" in cols
+                else "0001"
+            )
+            command.stamp(cfg, rev)
         command.upgrade(cfg, "head")
     if engine.dialect.name == "postgresql":
         # Supabase exposes the public schema through its Data API (anon key). RLS with no

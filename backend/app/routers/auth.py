@@ -53,6 +53,9 @@ def _send_reset_email(to: str, link: str, ttl: int) -> None:
 )
 def register(body: RegisterIn, response: Response, db: Session = Depends(get_db)):
     email = body.email.lower()
+    if body.website:  # honeypot field, invisible to people: only bots fill it in
+        log.info("sign-up honeypot triggered")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sign-up failed. Please try again.")
     signup_limiter.hit("global")
     if db.scalar(select(User).where(func.lower(User.email) == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists.")
@@ -100,6 +103,14 @@ def logout(response: Response):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(current_user)):
     return user
+
+
+@router.delete("/me", status_code=204)
+def delete_account(response: Response, user: User = Depends(current_user), db=Depends(get_db)):
+    """Delete the account and everything in it (documents, files, templates, usage)."""
+    db.delete(db.merge(user))  # FK cascades remove the rest
+    db.commit()
+    clear_session_cookie(response)
 
 
 @router.post("/forgot-password", status_code=202, dependencies=[Depends(auth_limiter)])

@@ -27,14 +27,29 @@ services:
         sync: false
       - key: CORS_ORIGINS # JSON list, e.g. ["https://your-app.vercel.app"]
         sync: false
-      # Optional: leave empty to run the public demo with the free offline extractor.
+      # Optional: without it every extraction uses the free standard reader (text + OCR).
+      # Use a key from a project WITHOUT billing so it can never cost money.
       - key: GEMINI_API_KEY
         sync: false
-      # Hard daily caps on Gemini calls (retries count). Keep them low for a public demo.
+      # Default daily caps on Gemini calls (retries count); the admin panel can change them.
       - key: AI_DAILY_LIMIT_PER_USER
         value: "10"
       - key: AI_DAILY_LIMIT_GLOBAL
         value: "100"
+      # Admin panel access: comma-separated emails. The account must sign in with Google or
+      # GitHub once (verified email) before the panel opens.
+      - key: ADMIN_EMAILS
+        sync: false
+      # Sign in with Google / GitHub. Callback URLs: <APP_URL>/api/auth/oauth/google/callback
+      # and <APP_URL>/api/auth/oauth/github/callback. Empty = button hidden.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
       # Optional SMTP for password reset; without it, reset is disabled in production.
       - key: SMTP_HOST
         sync: false

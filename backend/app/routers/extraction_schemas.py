@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.demo.data import SCHEMAS
 from app.models import Document, ExtractionSchema, User
 from app.schemas import SchemaIn, SchemaOut
 from app.security import current_user
@@ -41,6 +42,15 @@ def list_schemas(user: User = Depends(current_user), db: Session = Depends(get_d
         .where(ExtractionSchema.user_id == user.id)
         .order_by(ExtractionSchema.created_at)
     ).all()
+    # Accounts created before a template existed get it now (built-ins cannot be deleted).
+    have = {s.kind for s in schemas}
+    missing = [ExtractionSchema(user_id=user.id, **t) for t in SCHEMAS if t["kind"] not in have]
+    if missing:
+        db.add_all(missing)
+        db.commit()
+        schemas = [*schemas, *missing]
+    order = {t["kind"]: i for i, t in enumerate(SCHEMAS)}
+    schemas = sorted(schemas, key=lambda s: order.get(s.kind, len(order)))  # stable: custom last
     return [_out(s, counts.get(s.id, 0)) for s in schemas]
 
 
@@ -77,6 +87,9 @@ def update_schema(
 def delete_schema(
     schema_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
+    schema = get_owned_schema(db, user, schema_id)
+    if schema.kind:
+        raise HTTPException(409, "Built-in templates can't be deleted, but you can edit them.")
     # Documents keep their schema snapshot, so deleting a schema never loses results.
-    db.delete(get_owned_schema(db, user, schema_id))
+    db.delete(schema)
     db.commit()

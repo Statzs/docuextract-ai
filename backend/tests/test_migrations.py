@@ -25,7 +25,7 @@ def test_fresh_database_matches_the_models():
     with engine.connect() as conn:
         diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
     assert diff == [], diff  # migrations and models describe the same schema
-    assert _head_revision() == "0002"
+    assert _head_revision() == "0003"
     _wipe()
 
 
@@ -45,7 +45,7 @@ def test_pre_alembic_database_is_upgraded_in_place():
         row = conn.execute(text("SELECT email, token_version FROM users")).one()
     assert tuple(row) == ("old@example.com", 0)  # data kept, new column defaulted
     assert inspect(engine).has_table("password_reset_tokens")
-    assert _head_revision() == "0002"
+    assert _head_revision() == "0003"
     _wipe()
 
 
@@ -53,6 +53,6 @@ def test_create_all_database_with_current_schema_is_only_stamped():
     _wipe()
     Base.metadata.create_all(engine)
     init_db()  # must not try to add columns that already exist
-    assert _head_revision() == "0002"
+    assert _head_revision() == "0003"
     init_db()  # and running again is a no-op
     _wipe()

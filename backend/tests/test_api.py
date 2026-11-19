@@ -52,7 +52,14 @@ def test_forged_token_is_rejected():
 # ---- schemas ----
 def test_new_users_get_template_schemas(client):
     names = [s["name"] for s in client.get("/api/schemas").json()]
-    assert names == ["Invoice", "Receipt", "Residential Lease"]
+    assert names == [
+        "Invoice",
+        "Receipt",
+        "Contract",
+        "Purchase Order",
+        "Payment Record",
+        "General Document",
+    ]
 
 
 def test_schema_crud_and_validation(client):
@@ -247,7 +254,7 @@ def test_usage_summary(client):
     upload(client)
     u = client.get("/api/usage", params={"days": 7}).json()
     assert u["total_requests"] == 1 and u["failed_requests"] == 0
-    assert u["estimated"] is True and len(u["series"]) == 7
+    assert u["estimated"] is False and len(u["series"]) == 7
     assert u["series"][-1]["requests"] == 1
     assert u["status_counts"] == {"needs_review": 1}
 
@@ -258,18 +265,19 @@ def test_demo_workspace_is_seeded_and_isolated():
     assert a.post("/api/auth/demo").status_code == 201
     assert b.post("/api/auth/demo").status_code == 201
     docs = a.get("/api/documents").json()
-    assert docs["total"] == 6
+    assert docs["total"] == 9
     statuses = {d["status"] for d in docs["items"]}
-    assert statuses == {"needs_review", "validated"}
+    # The scanned image waits for the visitor to extract it live.
+    assert statuses == {"needs_review", "validated", "uploaded"}
     assert a.get("/api/auth/me").json()["id"] != b.get("/api/auth/me").json()["id"]
     assert b.get(f"/api/documents/{docs['items'][0]['id']}").status_code == 404
     usage = a.get("/api/usage").json()
-    assert usage["total_requests"] == 6
+    assert usage["total_requests"] == 8
 
 
 def test_config_reports_demo_mode():
     cfg = TestClient(app).get("/api/config").json()
-    assert cfg["demo_mode"] is True and cfg["provider"] == "demo"
+    assert cfg["demo_mode"] is True and cfg["provider"] == "standard"
 
 
 def test_restart_recovery_marks_interrupted_jobs_failed(client):

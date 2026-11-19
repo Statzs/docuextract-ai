@@ -48,6 +48,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Install Tesseract (OCR fallback, as in the Docker image)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -55,6 +57,9 @@ jobs:
         run: uv run pytest -q
         env:
           TEST_DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgresql://postgres:postgres@localhost:5432/docuextract_test' || '' }}
+      - name: Accuracy benchmark (standard reader + OCR, generated fictional documents)
+        if: matrix.db == 'sqlite'
+        run: uv run python -m scripts.benchmark --per-layout 20
 
   frontend:
     name: Frontend

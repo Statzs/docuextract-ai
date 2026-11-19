@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.db import init_db
-from app.routers import auth, documents, extraction_schemas, usage
+from app.routers import admin, auth, documents, extraction_schemas, oauth, usage
 from app.services.processing import recover_interrupted_jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -71,7 +71,14 @@ async def unhandled(request: Request, exc: Exception):
     return JSONResponse({"detail": "Internal server error."}, status_code=500)
 
 
-for r in (auth.router, extraction_schemas.router, documents.router, usage.router):
+for r in (
+    auth.router,
+    oauth.router,
+    extraction_schemas.router,
+    documents.router,
+    usage.router,
+    admin.router,
+):
     app.include_router(r)
 
 

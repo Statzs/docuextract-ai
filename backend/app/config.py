@@ -17,8 +17,25 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: int = 60
 
     # Cost guard for public deployments: Gemini attempts per UTC day (retries count).
+    # These are defaults; the admin panel can override them (stored in app_settings).
     ai_daily_limit_per_user: int = 20
     ai_daily_limit_global: int = 200
+    daily_documents_per_user: int = 50
+    # Uploaded files and results are deleted after this many days (0 = keep forever).
+    retention_days: int = 30
+    # OCR is CPU heavy on a small instance: only the first N pages of a scanned PDF are read.
+    ocr_max_pages: int = 5
+
+    # Comma-separated emails that may open the admin panel. The account must have signed in
+    # with Google or GitHub at least once (verified email), so nobody can claim it by
+    # registering that address with a password first.
+    admin_emails: str = ""
+
+    # OAuth sign-in. Empty = that button is hidden.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
 
     # Public URL of the frontend, used to build links in emails.
     app_url: str = "http://localhost:5173"
@@ -54,6 +71,18 @@ class Settings(BaseSettings):
     @property
     def demo_mode(self) -> bool:
         return not self.gemini_api_key
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
+
+    @property
+    def github_enabled(self) -> bool:
+        return bool(self.github_client_id and self.github_client_secret)
 
 
 @lru_cache

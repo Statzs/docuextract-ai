@@ -19,6 +19,7 @@ class RegisterIn(BaseModel):
     email: EmailStr
     name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=8, max_length=128)
+    website: str = Field(default="", max_length=200)  # honeypot: hidden from people
 
 
 class LoginIn(BaseModel):
@@ -40,6 +41,8 @@ class UserOut(ORM):
     email: str
     name: str
     is_demo: bool
+    is_admin: bool = False
+    has_password: bool = True
 
 
 # ---- extraction schemas ----
@@ -74,6 +77,7 @@ class SchemaIn(BaseModel):
 class SchemaOut(ORM):
     id: str
     name: str
+    kind: str | None = None
     description: str
     fields: list[FieldDef]
     created_at: datetime
@@ -90,6 +94,7 @@ class FieldValue(BaseModel):
 class DocumentOut(ORM):
     id: str
     filename: str
+    mode: str = "auto"
     mime_type: str
     size_bytes: int
     page_count: int | None
@@ -110,6 +115,14 @@ class DocumentDetail(DocumentOut):
     schema_snapshot: list[FieldDef]
     extracted_data: dict[str, FieldValue] | None
     reviewed_data: dict[str, Any] | None
+    # Only on upload / while waiting for a type: the template the text suggests.
+    suggested_schema_id: str | None = None
+    duplicate: bool = False  # the same file was already uploaded; this is that document
+
+
+class ExtractIn(BaseModel):
+    schema_id: str
+    mode: Literal["auto", "private"] = "auto"
 
 
 class DocumentPage(BaseModel):
@@ -152,5 +165,26 @@ class AppConfig(BaseModel):
     provider: str
     model: str
     max_upload_mb: int
+    max_pdf_pages: int
     accepted_types: list[str]
     password_reset_enabled: bool
+    ocr_available: bool
+    retention_days: int
+    google_enabled: bool
+    github_enabled: bool
+
+
+class AiStatus(BaseModel):
+    available: bool
+    reason: str | None
+    remaining_today: int | None
+
+
+class AdminLimits(BaseModel):
+    ai_enabled: bool | None = None
+    ai_daily_limit_per_user: int | None = None
+    ai_daily_limit_global: int | None = None
+    daily_documents_per_user: int | None = None
+    max_pdf_pages: int | None = None
+    ocr_max_pages: int | None = None
+    retention_days: int | None = None

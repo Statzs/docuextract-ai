@@ -137,8 +137,30 @@ def render(title: str, lines: list[str], receipt: bool = False) -> bytes:
     return bytes(pdf.output())
 
 
+def scan(pdf: bytes) -> bytes:
+    """A phone-photo look: rasterised, slightly rotated, grey paper, light noise."""
+    import io
+    import random
+
+    import pypdfium2 as pdfium
+    from PIL import Image, ImageFilter
+
+    page = pdfium.PdfDocument(pdf)[0]
+    img = page.render(scale=170 / 72).to_pil().convert("L")
+    img = img.rotate(0.8, expand=True, fillcolor=235).filter(ImageFilter.GaussianBlur(0.6))
+    rnd = random.Random(7)  # noqa: S311 (deterministic noise, not security)
+    noise = Image.frombytes(
+        "L", img.size, bytes(rnd.randrange(0, 18) for _ in range(img.size[0] * img.size[1]))
+    )
+    img = Image.blend(img, noise.point(lambda v: 255 - v), 0.12)
+    out = io.BytesIO()
+    img.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     for filename, schema, title, lines, _days, _validate in SAMPLES:
-        (OUT / filename).write_bytes(render(title, lines, receipt=schema == "Receipt"))
+        pdf = render(title, lines, receipt=schema == "Receipt")
+        (OUT / filename).write_bytes(scan(pdf) if filename.endswith(".png") else pdf)
         print("wrote", filename)

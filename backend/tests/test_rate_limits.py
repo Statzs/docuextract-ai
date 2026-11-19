@@ -88,7 +88,12 @@ def test_reset_requests_are_limited_per_email(limits_on, monkeypatch):
 
 def test_uploads_are_limited_per_user(client, limits_on, monkeypatch):
     monkeypatch.setattr(security.upload_limiter, "limit", 2)
-    assert [upload(client).status_code for _ in range(3)] == [201, 201, 429]
+    files = [
+        "invoice-halden-roe-0142.pdf",
+        "invoice-kestrel-cloud-311.pdf",
+        "receipt-cafe-orilla.pdf",
+    ]
+    assert [upload(client, f).status_code for f in files] == [201, 201, 429]
 
 
 def test_new_workspaces_have_a_global_cap(limits_on, monkeypatch):

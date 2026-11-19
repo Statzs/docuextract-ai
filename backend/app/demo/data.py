@@ -67,54 +67,94 @@ RECEIPT_FIELDS = [
     },
 ]
 
-LEASE_FIELDS = [
-    {"key": "landlord", "label": "Landlord", "type": "string", "required": True, "description": ""},
-    {"key": "tenant", "label": "Tenant", "type": "string", "required": True, "description": ""},
-    {
-        "key": "property_address",
-        "label": "Property Address",
-        "type": "string",
-        "required": True,
-        "description": "",
-    },
-    {
-        "key": "start_date",
-        "label": "Start Date",
-        "type": "date",
-        "required": True,
-        "description": "",
-    },
-    {
-        "key": "monthly_rent",
-        "label": "Monthly Rent",
-        "type": "currency",
-        "required": True,
-        "description": "",
-    },
-    {
-        "key": "pets_allowed",
-        "label": "Pets Allowed",
-        "type": "boolean",
-        "required": False,
-        "description": "",
-    },
+
+def _f(key, label, type="string", required=False, description=""):
+    return {
+        "key": key,
+        "label": label,
+        "type": type,
+        "required": required,
+        "description": description,
+    }
+
+
+CONTRACT_FIELDS = [
+    _f("contract_title", "Title", description="Name of the agreement, e.g. Residential Lease."),
+    _f("party_one", "First Party", required=True, description="Landlord, seller, provider."),
+    _f("party_two", "Second Party", required=True, description="Tenant, buyer, client."),
+    _f("effective_date", "Start Date", "date", True, "Date the agreement takes effect."),
+    _f("end_date", "End Date", "date"),
+    _f("contract_value", "Amount", "currency", description="Main amount: price, fee or rent."),
+    _f("governing_law", "Governing Law"),
 ]
 
+PURCHASE_ORDER_FIELDS = [
+    _f("po_number", "PO Number", required=True),
+    _f("buyer", "Buyer", required=True, description="Company placing the order."),
+    _f("supplier", "Supplier", required=True),
+    _f("order_date", "Order Date", "date", True),
+    _f("delivery_date", "Delivery Date", "date"),
+    _f("total", "Total", "currency", True),
+    _f("currency", "Currency", description="ISO 4217 code, e.g. USD."),
+]
+
+PAYMENT_FIELDS = [
+    _f("payer", "Payer", required=True, description="Who paid."),
+    _f("payee", "Payee", required=True, description="Who received the money."),
+    _f("payment_date", "Payment Date", "date", True),
+    _f("amount", "Amount", "currency", True),
+    _f("currency", "Currency", description="ISO 4217 code, e.g. USD."),
+    _f("payment_method", "Payment Method"),
+    _f("reference", "Reference", description="Transaction or confirmation number."),
+]
+
+GENERAL_FIELDS = [
+    _f("title", "Title", description="Title or subject of the document."),
+    _f("document_date", "Date", "date"),
+    _f("issuer", "From", description="Person or organisation that issued it."),
+    _f("recipient", "To", description="Who it is addressed to."),
+    _f("reference_number", "Reference Number"),
+    _f("total_amount", "Total Amount", "currency"),
+    _f("summary", "Summary", description="One or two sentences on what the document is about."),
+]
+
+# Built-in templates every account starts with. `kind` drives the type suggestion.
 SCHEMAS = [
     {
         "name": "Invoice",
-        "description": "Supplier invoices for accounts payable.",
+        "kind": "invoice",
+        "description": "Bills from suppliers: number, dates, amounts and tax.",
         "fields": INVOICE_FIELDS,
     },
     {
         "name": "Receipt",
-        "description": "Expense receipts for reimbursement.",
+        "kind": "receipt",
+        "description": "Shop and restaurant receipts for expenses.",
         "fields": RECEIPT_FIELDS,
     },
     {
-        "name": "Residential Lease",
-        "description": "Key terms from rental agreements.",
-        "fields": LEASE_FIELDS,
+        "name": "Contract",
+        "kind": "contract",
+        "description": "Agreements and leases: parties, dates and amounts.",
+        "fields": CONTRACT_FIELDS,
+    },
+    {
+        "name": "Purchase Order",
+        "kind": "purchase_order",
+        "description": "Orders sent to suppliers.",
+        "fields": PURCHASE_ORDER_FIELDS,
+    },
+    {
+        "name": "Payment Record",
+        "kind": "payment_record",
+        "description": "Transfers, payment confirmations and remittances.",
+        "fields": PAYMENT_FIELDS,
+    },
+    {
+        "name": "General Document",
+        "kind": "general",
+        "description": "Any other document: title, date, sender and recipient.",
+        "fields": GENERAL_FIELDS,
     },
 ]
 
@@ -226,7 +266,7 @@ SAMPLES = [
     ),
     (
         "lease-14-linden-court.pdf",
-        "Residential Lease",
+        "Contract",
         "RESIDENTIAL LEASE AGREEMENT",
         [
             "This agreement is made between the parties below.",
@@ -235,9 +275,69 @@ SAMPLES = [
             "Tenant: Jonah Whitfield",
             "Property Address: 14 Linden Court, Apt 3B, Ashford",
             "Start Date: 2026-12-01",
+            "End Date: 2027-11-30",
             "Term: 12 months",
             "Monthly Rent: 1,450.00",
             "Pets Allowed: no",
+        ],
+        0,
+        False,
+    ),
+    (
+        "purchase-order-northfield-5520.pdf",
+        "Purchase Order",
+        "PURCHASE ORDER",
+        [
+            "Northfield Robotics Ltd",
+            "9 Foundry Row, Leeds",
+            "",
+            "PO Number: NR-PO-5520",
+            "Buyer: Northfield Robotics Ltd",
+            "Supplier: Calder Steel Supplies",
+            "Order Date: 2026-11-05",
+            "Delivery Date: 2026-11-26",
+            "",
+            "Stainless sheet 2mm (40 units)          1,840.00",
+            "Laser cutting service                     420.00",
+            "",
+            "Total: 2,260.00",
+            "Currency: GBP",
+        ],
+        4,
+        False,
+    ),
+    (
+        "payment-confirmation-tx-88213.pdf",
+        "Payment Record",
+        "PAYMENT CONFIRMATION",
+        [
+            "Lumen Bank",
+            "",
+            "Payer: Orchard Lane Bakery",
+            "Payee: Greenmill Flour Co.",
+            "Payment Date: 2026-11-12",
+            "Amount: 1,275.50",
+            "Currency: USD",
+            "Payment Method: Bank transfer",
+            "Reference: TX-88213-QF",
+        ],
+        1,
+        False,
+    ),
+    (
+        "receipt-scan-harbor-books.png",  # an image: read with OCR, not the PDF text layer
+        "Receipt",
+        "RECEIPT",
+        [
+            "Harbor Books",
+            "12 Wharf Street",
+            "",
+            "Merchant: Harbor Books",
+            "Date: 2026-11-15",
+            "Paperback novel      14.99",
+            "Notebook              6.50",
+            "Payment Method: Cash",
+            "Total: 21.49",
         ],
         0,
         False,

@@ -7,10 +7,11 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.db import SessionLocal
+from app.extraction.base import ExtractionResult, TransientExtractionError
 from app.main import app
 from app.models import DocStatus, Document, PasswordResetToken, UsageEvent, User, utcnow
 from app.services.processing import process_document
-from tests.conftest import upload
+from tests.conftest import SAMPLES, schema_id, upload
 
 
 @pytest.fixture
@@ -89,13 +90,21 @@ def test_expired_or_bogus_reset_tokens_are_rejected(client, outbox):
         assert r.status_code == 400
 
 
-def test_ai_quota_blocks_uploads_in_gemini_mode(client, other_client, monkeypatch):
+class FakeGemini:
+    name, model = "gemini", "fake-gemini"
+
+    def extract(self, content, mime, fields):
+        return ExtractionResult(
+            {f["key"]: {"value": None, "confidence": 0} for f in fields}, model=self.model
+        )
+
+
+def test_ai_quota_falls_back_to_standard_reading(client, other_client, monkeypatch):
     s = get_settings()
     monkeypatch.setattr(s, "gemini_api_key", "test-key")
     monkeypatch.setattr(s, "ai_daily_limit_per_user", 2)
     monkeypatch.setattr(s, "ai_daily_limit_global", 3)
-    # Keep the background job from calling the real API.
-    monkeypatch.setattr("app.routers.documents.process_document", lambda *a, **k: None)
+    monkeypatch.setattr("app.services.processing.get_ai_extractor", FakeGemini)
     with SessionLocal() as db:
         ada = db.query(User).filter_by(email="ada@example.com").one()
         db.add_all(
@@ -106,15 +115,70 @@ def test_ai_quota_blocks_uploads_in_gemini_mode(client, other_client, monkeypatc
         )
         db.commit()
 
-    r = upload(client)
-    assert r.status_code == 429 and "today's AI extraction limit" in r.json()["detail"]
-    assert upload(other_client).status_code == 201  # per-user limit is per user
+    # Ada is over her limit: the upload still works, read without AI, and says why.
+    doc = client.get(f"/api/documents/{upload(client).json()['id']}").json()
+    assert doc["status"] == "needs_review" and doc["provider"] == "text"
+    assert "today's 2 AI extractions" in doc["notes"]
+    assert doc["extracted_data"]["total"]["value"] == 3834.0  # real values, not AI ones
 
-    with SessionLocal() as db:
-        db.add(UsageEvent(user_id=ada.id, provider="gemini", model="m", success=True))
-        db.commit()
-    r = upload(other_client)
-    assert r.status_code == 429 and "daily AI budget" in r.json()["detail"]
+    # Mallory still has AI (the per-user limit is per user)...
+    doc = other_client.get(f"/api/documents/{upload(other_client).json()['id']}").json()
+    assert doc["provider"] == "gemini"
+    # ...until the shared daily budget (3) is spent.
+    r = upload(other_client, "receipt-cafe-orilla.pdf", schema="Receipt")
+    doc = other_client.get(f"/api/documents/{r.json()['id']}").json()
+    assert doc["provider"] == "text" and "shared AI budget" in doc["notes"]
+
+
+def test_private_mode_never_uses_ai(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "test-key")
+    called = []
+    monkeypatch.setattr("app.services.processing.get_ai_extractor", lambda: called.append(1))
+    data = (SAMPLES / "invoice-halden-roe-0142.pdf").read_bytes()
+    r = client.post(
+        "/api/documents",
+        files={"file": ("x.pdf", data, "application/pdf")},
+        data={"schema_id": schema_id(client), "mode": "private"},
+    )
+    doc = client.get(f"/api/documents/{r.json()['id']}").json()
+    assert called == [] and doc["mode"] == "private" and doc["provider"] == "text"
+    assert "not sent to any AI" in doc["notes"]
+
+
+def test_ai_failure_falls_back_and_says_so(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "test-key")
+
+    class Broken:
+        name, model = "gemini", "broken"
+
+        def extract(self, *a):
+            raise TransientExtractionError("429 quota", "The AI provider is busy.")
+
+    monkeypatch.setattr("app.services.processing.get_ai_extractor", Broken)
+    doc = client.get(f"/api/documents/{upload(client).json()['id']}").json()
+    assert doc["status"] == "needs_review" and doc["provider"] == "text"
+    assert "AI could not process" in doc["notes"]
+    with SessionLocal() as db:  # every AI attempt is still counted against the budget
+        assert db.query(UsageEvent).filter_by(provider="gemini", success=False).count() == 3
+
+
+def test_ai_values_missing_from_the_text_are_flagged(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "test-key")
+
+    class Inventive:
+        name, model = "gemini", "inventive"
+
+        def extract(self, content, mime, fields):
+            raw = {f["key"]: {"value": None, "confidence": 0} for f in fields}
+            raw["invoice_number"] = {"value": "HR-2026-0142", "confidence": 0.99}  # real
+            raw["vendor_name"] = {"value": "Totally Made Up Ltd", "confidence": 0.99}  # invented
+            return ExtractionResult(raw, model=self.model)
+
+    monkeypatch.setattr("app.services.processing.get_ai_extractor", Inventive)
+    doc = client.get(f"/api/documents/{upload(client).json()['id']}").json()
+    assert doc["extracted_data"]["invoice_number"]["confidence"] == 0.99
+    assert doc["extracted_data"]["vendor_name"]["confidence"] == 0.4
+    assert "do not appear word for word" in doc["notes"]
 
 
 def test_job_claim_is_atomic(client):
@@ -155,7 +219,8 @@ def test_demo_visitors_never_use_gemini(monkeypatch):
     monkeypatch.setattr(s, "ai_daily_limit_global", 0)  # even with the budget spent
     demo = TestClient(app)
     assert demo.post("/api/auth/demo").status_code == 201
-    r = upload(demo, "receipt-cafe-orilla.pdf", schema="Receipt")
+    data = (SAMPLES / "receipt-cafe-orilla.pdf").read_bytes() + b" %%"  # not a duplicate
+    r = upload(demo, "receipt-cafe-orilla.pdf", schema="Receipt", data=data)
     assert r.status_code == 201
     doc = demo.get(f"/api/documents/{r.json()['id']}").json()
-    assert doc["provider"] == "demo" and doc["status"] == "needs_review"
+    assert doc["provider"] == "text" and doc["status"] == "needs_review"

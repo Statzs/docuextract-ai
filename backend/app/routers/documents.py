@@ -1,3 +1,4 @@
+import hashlib
 from datetime import date
 from typing import Literal
 from urllib.parse import quote
@@ -13,18 +14,22 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, undefer
 
 from app.config import get_settings
 from app.db import get_db
+from app.extraction.base import ExtractionError
+from app.extraction.classify import suggest_kind
 from app.extraction.normalize import coerce
-from app.models import DocStatus, Document, UsageEvent, User, utcnow
+from app.extraction.text import pdf_text
+from app.models import DocStatus, Document, ExtractionSchema, User, utcnow
 from app.routers.extraction_schemas import get_owned_schema
-from app.schemas import DocumentDetail, DocumentPage, ReviewIn
+from app.schemas import DocumentDetail, DocumentPage, ExtractIn, ReviewIn
 from app.security import current_user, upload_limiter
 from app.services import exporter
 from app.services.files import UploadRejected, validate_upload
+from app.services.limits import documents_today, get_limits, purge_expired_documents
 from app.services.processing import process_document
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -34,27 +39,6 @@ EXPORTS = {
     "xlsx": (exporter.to_xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     "json": (exporter.to_json, "application/json"),
 }
-
-
-def enforce_ai_quota(db: Session, user: User) -> None:
-    """Refuse new AI work once today's per-user or global Gemini budget is spent."""
-    s = get_settings()
-    if s.demo_mode or user.is_demo:
-        return  # offline extractor: no cost
-    midnight = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today = select(func.count()).where(
-        UsageEvent.provider == "gemini", UsageEvent.created_at >= midnight
-    )
-    # shortcut: check-then-act; concurrent uploads can overshoot by a few calls. Use a
-    # DB counter row with SELECT ... FOR UPDATE if the limit must be exact.
-    if db.scalar(today) >= s.ai_daily_limit_global:
-        raise HTTPException(
-            429, "The daily AI budget for this demo is used up. Try again tomorrow."
-        )
-    if db.scalar(today.where(UsageEvent.user_id == user.id)) >= s.ai_daily_limit_per_user:
-        raise HTTPException(
-            429, "You have reached today's AI extraction limit. Try again tomorrow."
-        )
 
 
 def get_owned_document(db: Session, user: User, doc_id: str, with_content=False) -> Document:
@@ -67,36 +51,124 @@ def get_owned_document(db: Session, user: User, doc_id: str, with_content=False)
     return doc
 
 
+def _suggest(db: Session, user: User, doc: Document) -> str | None:
+    """Pre-select a template from the PDF's text layer (images would need OCR: too slow here)."""
+    text = ""
+    if doc.mime_type == "application/pdf":
+        try:
+            text = pdf_text(doc.content)
+        except ExtractionError:
+            pass
+    kind = suggest_kind(text, doc.filename)
+    if not kind:
+        return None
+    return db.scalar(
+        select(ExtractionSchema.id).where(
+            ExtractionSchema.user_id == user.id, ExtractionSchema.kind == kind
+        )
+    )
+
+
+def _queue(doc: Document, schema: ExtractionSchema, mode: str) -> None:
+    doc.schema_id, doc.schema_name, doc.schema_snapshot = schema.id, schema.name, schema.fields
+    doc.mode, doc.status, doc.error = mode, DocStatus.QUEUED, None
+
+
 @router.post("", response_model=DocumentDetail, status_code=201)
 def upload_document(
     background: BackgroundTasks,
+    response: Response,
     file: UploadFile = File(...),
-    schema_id: str = Form(...),
+    schema_id: str | None = Form(None),
+    mode: Literal["auto", "private"] = Form("auto"),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    """Store a file. With `schema_id` extraction starts at once; without it the document
+    waits (status `uploaded`) for the user to pick a type, and a suggestion is returned."""
     upload_limiter.hit(user.id)  # per account, so a changing IP does not help
-    schema = get_owned_schema(db, user, schema_id)
-    enforce_ai_quota(db, user)
+    schema = get_owned_schema(db, user, schema_id) if schema_id else None
+    limits = get_limits(db)
+    purge_expired_documents(db, limits)
     limit = get_settings().max_upload_mb * 1024 * 1024
     data = file.file.read(limit + 1)  # bounded read: never buffer more than limit+1 bytes
     try:
-        meta = validate_upload(data, file.filename)
+        meta = validate_upload(data, file.filename, limits.max_pdf_pages)
     except UploadRejected as e:
         raise HTTPException(422, str(e)) from None
 
+    digest = hashlib.sha256(data).hexdigest()
+    existing = db.scalar(
+        select(Document)
+        .where(
+            Document.user_id == user.id,
+            Document.content_sha256 == digest,
+            Document.status != DocStatus.FAILED,
+        )
+        .order_by(Document.created_at.desc())
+    )
+    if existing:  # the same file again: no new storage, no new AI call
+        response.status_code = 200
+        out = DocumentDetail.model_validate(existing)
+        out.duplicate = True
+        return out
+    if documents_today(db, user.id) >= limits.daily_documents_per_user:
+        raise HTTPException(
+            429,
+            f"You can upload {limits.daily_documents_per_user} documents per day. "
+            "Please try again tomorrow.",
+        )
+
     doc = Document(
         user_id=user.id,
-        schema_id=schema.id,
-        schema_name=schema.name,
-        schema_snapshot=schema.fields,
+        schema_name="",
+        schema_snapshot=[],
         filename=meta.filename,
         mime_type=meta.mime_type,
         size_bytes=meta.size_bytes,
         page_count=meta.page_count,
         content=data,
+        content_sha256=digest,
+        status=DocStatus.UPLOADED,
     )
+    if schema:
+        _queue(doc, schema, mode)
     db.add(doc)
+    db.commit()
+    if schema:
+        background.add_task(process_document, doc.id)
+        return doc
+    out = DocumentDetail.model_validate(doc)
+    out.suggested_schema_id = _suggest(db, user, doc)
+    return out
+
+
+@router.post("/{doc_id}/extract", response_model=DocumentDetail)
+def extract_document(
+    doc_id: str,
+    body: ExtractIn,
+    background: BackgroundTasks,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Extract (or re-extract with another type) an uploaded document."""
+    upload_limiter.hit(user.id)
+    doc = get_owned_document(db, user, doc_id)
+    schema = get_owned_schema(db, user, body.schema_id)
+    # Atomic: two clicks cannot start two jobs (or two AI calls) for one document.
+    started = db.execute(
+        update(Document)
+        .where(
+            Document.id == doc.id,
+            Document.status.not_in([DocStatus.QUEUED, DocStatus.PROCESSING]),
+        )
+        .values(status=DocStatus.QUEUED)
+    ).rowcount
+    if not started:
+        db.rollback()
+        raise HTTPException(409, "This document is already being processed.")
+    db.refresh(doc)
+    _queue(doc, schema, body.mode)
     db.commit()
     background.add_task(process_document, doc.id)
     return doc
@@ -156,7 +228,12 @@ def export_documents(
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
 def get_document(doc_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return get_owned_document(db, user, doc_id)
+    doc = get_owned_document(db, user, doc_id)
+    if doc.status != DocStatus.UPLOADED:
+        return doc
+    out = DocumentDetail.model_validate(doc)
+    out.suggested_schema_id = _suggest(db, user, doc)
+    return out
 
 
 @router.get("/{doc_id}/file")
@@ -218,7 +295,8 @@ def retry_document(
     doc = get_owned_document(db, user, doc_id)
     if doc.status in (DocStatus.QUEUED, DocStatus.PROCESSING):
         raise HTTPException(409, "This document is already being processed.")
-    enforce_ai_quota(db, user)
+    if not doc.schema_snapshot:
+        raise HTTPException(409, "Choose a document type first.")
     doc.status, doc.error = DocStatus.QUEUED, None
     db.commit()
     background.add_task(process_document, doc.id)

@@ -21,6 +21,10 @@ DATE_FORMATS = [
     "%d %B %Y",
     "%d %b %Y",
     "%Y/%m/%d",
+    "%B %d %Y",
+    "%b %d %Y",
+    "%d/%m/%y",
+    "%m/%d/%y",
 ]
 TRUE = {"true", "yes", "y", "1", "si", "sí", "x"}
 FALSE = {"false", "no", "n", "0"}
@@ -48,7 +52,8 @@ def parse_number(raw: Any) -> float | None:
 
 
 def parse_date(raw: Any) -> str | None:
-    s = str(raw).strip()
+    s = re.sub(r"\s+", " ", str(raw).strip())
+    s = re.sub(r"(?<=[A-Za-z])\.", "", s)  # "Nov. 3, 2026"
     for fmt in DATE_FORMATS:
         try:
             return datetime.strptime(s, fmt).date().isoformat()
