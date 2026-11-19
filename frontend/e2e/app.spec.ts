@@ -50,7 +50,7 @@ test("register → upload → review → validate → export CSV", async ({ page
   await expect(page.getByText("Expected a valid currency.")).toBeVisible()
 
   await total.fill("3900")
-  await total.press("Enter") // submits the form; the sticky Validate bar moves under Playwright auto-scroll
+  await page.getByRole("button", { name: "Validate" }).click()
   await expect(page.getByText("Validated", { exact: true }).first()).toBeVisible()
   await expect(total).toHaveValue("3900.00")
 

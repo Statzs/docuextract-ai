@@ -32,7 +32,7 @@ createRoot(document.getElementById("root")!).render(
         <MotionConfig reducedMotion="user">
           <App />
         </MotionConfig>
-        <Toaster position="bottom-right" />
+        <Toaster position="top-center" /> {/* bottom toasts covered the sticky Validate bar */}
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,

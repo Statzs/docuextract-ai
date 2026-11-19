@@ -80,12 +80,14 @@ payment records in several layouts and scores every field. Some layouts use word
 rules have never seen ("Bill No.", "Sold by", "Amount payable"), so the score is not
 tuned to the test.
 
-| Layout | Text reading + rules |
-|---|---|
-| `Label: value` lines | 96 % of fields correct |
-| Two-column tables | 95 % |
-| Label above value | 96 % |
-| Scanned image (OCR) | measured in CI, which has Tesseract installed |
+CI run of 2026-11-18, 20 documents per layout, 95 fields each:
+
+| Layout | Method | Fields correct |
+|---|---|---|
+| `Label: value` lines | Text reading + rules | 91/95 (96 %) |
+| Two-column tables | Text reading + rules | 91/95 (96 %) |
+| Label above value | Text reading + rules | 87/95 (92 %) |
+| Rotated, blurred, noisy scan | Tesseract OCR + rules | 90/95 (95 %) |
 
 Run `uv run python -m scripts.benchmark --gemini` with a key to compare against the AI.
 These are synthetic documents: real-world documents are messier, which is why every
