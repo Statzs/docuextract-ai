@@ -8,12 +8,13 @@ root.
 
 ## 1. The 30-second pitch
 
-> DocuExtract turns documents into structured data. Users define a schema of fields,
-> Gemini fills it using constrained JSON output, and a human reviews every value next to
-> the original before export. The interesting engineering is in the reliability around the
-> model: type normalisation, retries with backoff, usage metering, restart recovery, and
-> keeping the raw AI output separate from human corrections. It runs end to end without
-> any API key, thanks to an offline demo extractor.
+> DocuExtract turns invoices, receipts and contracts into a spreadsheet. You upload a file,
+> pick the document type (it is usually suggested), and it finds the key values; you check
+> them next to the original and download Excel, CSV or JSON. Reading is hybrid: Gemini when
+> it is available and allowed, otherwise PDF text or Tesseract OCR plus rules, and every
+> document says which method was used. The interesting engineering is around the model:
+> fallbacks, quotas the owner can change live, never inventing values, secure OAuth, and
+> keeping the raw output separate from human corrections. It costs nothing to run.
 
 ---
 
@@ -36,10 +37,12 @@ root.
   `UPDATE documents SET status='processing' WHERE id=? AND status='queued'` and only
   continues if one row changed. Two concurrent runs (a double-clicked retry, say) cannot
   both call the provider and bill twice. A read-then-write check would have a race window.
-- **Cost guard:** before queuing, `enforce_ai_quota` counts today's Gemini usage events
-  for the user and globally and returns 429 past the limit. It is check-then-act, so
-  concurrent uploads can overshoot by a few calls; an exact cap would need a counter row
-  locked with `SELECT … FOR UPDATE`. Demo users always get the offline extractor.
+- **Cost guard with a fallback, not an error:** `services/limits.py::ai_block_reason`
+  counts today's Gemini usage events for the user and globally. Past a limit (or in
+  private mode, for demo users, with no key, or when the admin switches AI off) the job
+  uses the standard reader and stores a plain-language reason. It is check-then-act, so
+  concurrent jobs can overshoot by a few calls; an exact cap would need a counter row
+  locked with `SELECT … FOR UPDATE`.
 - **Restart recovery:** on startup, rows stuck in `queued`/`processing` become `failed` with
   a "please retry" message (`recover_interrupted_jobs`).
 
@@ -188,8 +191,15 @@ calls are a documented manual check.
 
 ## 11. Honest answers to hard questions
 
-- *Is the demo extractor AI?* No. It is a text matcher so the product works without keys.
-  The UI and README say so.
+- *Is the standard reader AI?* No. It is PDF text or Tesseract OCR plus label rules. Each
+  document shows a badge (*Read by AI*, *Text reading*, *OCR*) so users know.
+- *How do you stop the AI from making things up?* Values must fit the template's JSON
+  schema; AI values are searched for in the PDF's own text and get low confidence if absent;
+  the rules never guess (no label, no value); and a human validates every document.
+- *How accurate is it?* `scripts/benchmark.py` generates fictional documents in several
+  layouts, including wordings the rules have never seen, and scores every field (about
+  95 % for text reading on these). Synthetic documents are easier than real ones, which is
+  why review is built in.
 - *What would you do next?* A durable job queue, object storage for
   files, line-item tables (repeating fields), an accuracy dashboard comparing extracted vs.
   reviewed values, and email verification.
@@ -236,3 +246,41 @@ with tables but no `alembic_version`, inspects the `users` columns to see which 
 matches, `stamp`s that revision, then upgrades. The new column has a `server_default`, so
 existing rows get a valid value. A test builds a pre-migration database with data and
 checks that the data survives.
+
+## 15. Hybrid reading and fallbacks (`backend/app/services/processing.py::_hybrid`)
+
+**What happens:** the job asks `ai_block_reason` whether AI may be used. If yes, Gemini
+runs with retries; any final error falls through to `StandardExtractor`. The method
+actually used is stored in `provider` and the reason in `notes`.
+
+**Questions to expect**
+- *Why not just fail when Gemini is down?* The user came to get data out of a document. A
+  slightly less capable result, clearly labelled, beats an error page.
+- *Why Tesseract on the server and not in the browser?* tesseract.js means a ~10 MB
+  download per visitor and is slow on phones. The server already has the file; the cost is
+  CPU on a small free instance, bounded by `OCR_MAX_PAGES` and a timeout.
+- *How is the type suggested?* `extraction/classify.py` scores keywords in the PDF text
+  and filename and only suggests when one type clearly wins. A wrong suggestion costs a
+  click; a hidden wrong guess would cost trust.
+
+## 16. Google and GitHub sign-in (`backend/app/routers/oauth.py`)
+
+- **PKCE + signed state cookie:** the start endpoint stores `state` and the PKCE verifier
+  in a short-lived signed `HttpOnly` cookie; the callback rejects a missing or different
+  state (CSRF / login injection) and exchanges the code server-side.
+- **Linking by verified email only.** An attacker could register `victim@gmail.com` with a
+  password before the victim ever signs in with Google. When the verified Google sign-in
+  arrives, that unverified account's password is wiped and its sessions revoked
+  (`token_version`), so the attacker is locked out. Tested in `tests/test_product.py`.
+- **Admin by allow-list + verified email:** `ADMIN_EMAILS` alone is not enough, because
+  anyone could register that email with a password; the account must be provider-verified.
+
+## 17. Demo script (3 minutes, works on a phone)
+
+1. Landing page: one sentence on the problem, show the examples tabs.
+2. *Try it now*: open a checked invoice; point at confidence and the method badge.
+3. Open the scanned photo, choose *Receipt*, *Extract information*: OCR live.
+4. *Extract a document* → purchase-order sample: type already suggested; extract.
+5. *Download* → Excel.
+6. If you are signed in as the owner, open the admin panel: quota, fallbacks, limits.
+7. Close with the fallback story and the privacy choice (Smart vs Private).

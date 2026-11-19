@@ -1,8 +1,8 @@
 # DocuExtract AI
 
-**Turn PDFs and images into structured, reviewed data.** Define the fields you need, let
-Google Gemini read the document, check every value side by side with the original, then
-export clean CSV, Excel or JSON.
+**Turn invoices, receipts and contracts into a spreadsheet.** Upload a PDF or a photo,
+say what kind of document it is, and DocuExtract finds the dates, names, totals and
+reference numbers. You check them next to the original and download Excel, CSV or JSON.
 
 [![CI](https://github.com/Statzs/docuextract-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Statzs/docuextract-ai/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
@@ -10,252 +10,228 @@ export clean CSV, Excel or JSON.
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-59%20backend%20·%2012%20unit%20·%209%20E2E-success)
 
 ![Demo: sample upload, review, validate](docs/demo.gif)
 
 > **About this project.** DocuExtract AI is an independent portfolio project built by
 > Rafael Ugarte to show full-stack product engineering end to end. It is a complete,
-> working application, but it is not a commercial service: it has no customers or
-> production traffic, and every company, person and document in the demo data is fictional.
+> working application, but not a commercial service: it has no customers, and every
+> company, person and document in the demo data is fictional.
 
 ---
 
-## Try it in 30 seconds
+## Try it
 
-**Live demo: [docuextract-ai-three.vercel.app/demo](https://docuextract-ai-three.vercel.app/demo)** — one click opens a
-fresh workspace. Or click **Explore the demo — no signup** on the sign-in page.
-The API runs on a free instance that sleeps when idle, so the first visit can take up to a
-minute to wake it. Nothing to install, no account, no key. You get a private, throwaway
-workspace with six fictional documents and a short guided tour:
+**[docuextract-ai-three.vercel.app](https://docuextract-ai-three.vercel.app)** — works on
+a phone, tablet or computer. Click **Try it now — no signup** for a private, throwaway
+workspace with fictional documents (deleted after 24 hours), or create a free account with
+Google, GitHub or an email.
 
-1. open an extraction and compare it with the original,
-2. extract one of the sample PDFs yourself (two clicks, no file needed),
-3. edit a schema,
-4. export the results.
+The server runs on a free plan that sleeps when nobody uses it. The first visit after a
+quiet period can take up to a minute; the page says so while it wakes up.
 
-The demo workspace always uses the free offline extractor, so visitors can never spend the
-owner's AI budget. Demo workspaces are deleted after 24 hours.
+## How to use it (four steps)
 
-## Highlights
+1. **Upload** a PDF, PNG, JPEG or WebP (up to 10 MB).
+2. **Choose the type**: Invoice, Receipt, Contract, Purchase Order, Payment Record or
+   General Document. When the text makes it obvious, the type is already selected for you
+   (marked *Suggested*). Need other fields? Make your own template under *Advanced →
+   Templates*.
+3. Click **Extract information**. You can pick **Smart (AI)** or **Private (no AI)**.
+4. **Check and download.** Each value sits next to the document with a confidence score.
+   Fix anything wrong, click *Validate*, then *Download* as Excel, CSV or JSON — one
+   document or all of them.
 
-- **Schema-driven extraction.** Users define their own fields (text, number, currency,
-  date, yes/no) with optional hints. The schema becomes a JSON response schema for Gemini,
-  so the model can only return the requested shape.
-- **Human in the loop.** A side-by-side review screen with per-field confidence, inline
-  server-side validation, draft saves and an explicit *Validate* step. The raw AI output is
-  never overwritten, so there is always an audit trail of what the model said versus what
-  the human changed.
-- **Reliable processing.** Background jobs with an atomic claim (a job can't run twice),
-  exponential-backoff retries for transient provider errors (429/5xx/timeouts), manual
-  re-run, and recovery of jobs interrupted by a restart.
-- **Cost control.** Every AI attempt, retries included, is metered with tokens, latency
-  and outcome. Hard daily caps per user and globally stop a public deployment from running
-  up a bill.
-- **Runs with zero secrets.** Without a Gemini key the app switches to an offline demo
-  extractor, and everything (including the tests) works offline.
-- **Security.** HttpOnly cookie sessions, secure password reset that revokes all sessions,
-  per-user data isolation (tested for every endpoint), magic-byte file validation,
-  formula-injection-safe exports, rate limits that a spoofed IP cannot escape, and RLS
-  lock-down of the Supabase Data API.
-  Details in [SECURITY.md](SECURITY.md).
-- **Accessible.** Every screen passes automated axe WCAG 2.1 AA checks in light and dark
-  mode, and animations respect the OS *reduce motion* setting.
+## How the reading works
 
-| | |
+DocuExtract combines AI with classic methods, and always tells you which one was used
+(a badge on every document: *Read by AI*, *Text reading* or *OCR*).
+
+| Method | When | How |
+|---|---|---|
+| **Smart (AI)** | Default, when the server has a Gemini key and quota left | Google Gemini (`gemini-3.5-flash-lite`) reads the file and must answer in the exact shape of the template. |
+| **Text reading** | Private mode, or as the fallback for PDFs | Reads the PDF's own text layer and matches labels (`Total`, `Invoice No.`, `Fecha`…) with rules. |
+| **OCR** | Private mode or fallback, for photos and scanned PDFs | Tesseract (English + Spanish) turns the image into text, then the same rules apply. |
+
+**Never invented.** If a value is not in the document, the field stays empty. AI answers
+are cross-checked against the PDF's text: a value the AI returns that cannot be found in
+the document gets a low confidence and a "please check" note. Dates and amounts are
+normalised (`02 Oct 2026` → `2026-10-02`, `1.234,50` → `1234.50`).
+
+### What happens without Gemini
+
+Nothing breaks. If there is no key, the key is wrong, Google is down, or the daily AI limit
+is reached, the document is read with text reading or OCR instead, and a note explains why
+(for example *"Today's AI limit is reached, so standard text reading was used."*). The
+demo workspace always uses the free methods, so visitors can never spend the AI quota.
+
+### Privacy
+
+On Google's free tier, Gemini may use what it receives to improve Google's products. So:
+the AI option says so before you use it, and **Private (no AI)** reads the document entirely
+on DocuExtract's own server. Use Private mode for anything confidential. Documents are
+deleted automatically after 30 days (configurable), and you can delete a document or your
+whole account at any time.
+
+### Accuracy (measured, fictional documents)
+
+`backend/scripts/benchmark.py` generates fictional invoices, receipts, purchase orders and
+payment records in several layouts and scores every field. Some layouts use wordings the
+rules have never seen ("Bill No.", "Sold by", "Amount payable"), so the score is not
+tuned to the test.
+
+| Layout | Text reading + rules |
 |---|---|
-| ![Document review](docs/screenshots/review-dark.png) | ![Dashboard with guided tour](docs/screenshots/dashboard-light.png) |
-| ![Schema editor](docs/screenshots/schema-editor-dark.png) | ![API usage](docs/screenshots/usage-light.png) |
-| ![Sign in](docs/screenshots/login-dark.png) | ![Review on a phone](docs/screenshots/review-phone-light.png) |
+| `Label: value` lines | 96 % of fields correct |
+| Two-column tables | 95 % |
+| Label above value | 96 % |
+| Scanned image (OCR) | measured in CI, which has Tesseract installed |
+
+Run `uv run python -m scripts.benchmark --gemini` with a key to compare against the AI.
+These are synthetic documents: real-world documents are messier, which is why every
+value is shown for review.
+
+## For the owner: administration
+
+Sign in once with Google or GitHub using an email listed in `ADMIN_EMAILS`. An **Admin
+panel** link appears (nobody else can open it; the page answers "not found"). It shows:
+
+- Gemini status (key set, model, last success, last error) and a *Check the key now* button.
+- Whether the fallbacks work (PDF text, OCR languages).
+- Today's AI extractions vs. the limit, documents, failures, average processing time, users.
+- **Limits you can change live**: AI on/off, AI extractions per user and in total per day,
+  uploads per user per day, pages per PDF, OCR pages, days before documents are deleted.
+
+## Show it in an interview (3 minutes)
+
+1. Open the landing page on your phone: explain the problem in one sentence.
+2. **Try it now** → open a checked invoice: values next to the PDF, confidence, method badge.
+3. Open the scanned photo, choose *Receipt*, *Extract information*: OCR reads it live.
+4. Upload the purchase-order sample: the type is suggested, one click to extract.
+5. *Download* → Excel.
+6. Say what happens without AI (the fallback) and why there is a Private mode.
+
+The full walkthrough and likely questions are in **[docs/INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md)**.
+
+## Highlights for engineers
+
+- **Hybrid pipeline with honest provenance.** AI → fallback to PDF text or OCR + rules,
+  with the method and the reason stored per document. Retries with backoff for 429/5xx.
+- **Cost and abuse control.** Per-user and global daily AI caps, upload caps, page and
+  size limits, duplicate-file detection (same file → same document, no second AI call),
+  signup honeypot, rate limits keyed on an IP a client cannot spoof.
+- **Secure sign-in.** Google and GitHub OAuth with PKCE and a signed state cookie;
+  accounts are linked only by a provider-verified email, and a pre-registered unverified
+  account cannot take over the OAuth user.
+- **Safety.** Per-user isolation tested on every endpoint, magic-byte file checks,
+  decompression-bomb guard for images, prompt-injection instruction for the AI,
+  formula-safe exports, retention purge, account deletion. See [SECURITY.md](SECURITY.md).
+- **Accessible and responsive.** axe WCAG 2.1 AA checks on every screen in light and dark
+  mode; phone layouts; reduced-motion support.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Browser
-        SPA["React SPA<br/>TanStack Query · shadcn/ui · Motion"]
-    end
-    subgraph Vercel
-        Static["Static files"]
-        Proxy["/api/* rewrite"]
-    end
-    subgraph API["FastAPI (Docker)"]
-        Routers["Routers<br/>auth · documents · schemas · usage"]
-        Jobs["Background job<br/>claim → extract → retry → meter"]
-        Extractors{"Extractor"}
-    end
-    DB[("PostgreSQL<br/>Supabase · RLS locked")]
-    Gemini["Google Gemini<br/>structured JSON output"]
-    Demo["Offline demo extractor"]
-
-    SPA --> Static
-    SPA -- "same-origin cookie" --> Proxy --> Routers
-    Routers --> DB
-    Routers --> Jobs --> Extractors
-    Extractors -- "GEMINI_API_KEY set" --> Gemini
-    Extractors -- "no key / demo user" --> Demo
-    Jobs --> DB
+    SPA["React app<br/>(Vercel)"] -- "/api/* + secret header" --> API["FastAPI<br/>(Render, Docker)"]
+    API --> DB[("PostgreSQL<br/>Supabase")]
+    API --> Pipe{"Extraction"}
+    Pipe -- "Smart mode, key + quota" --> Gemini["Google Gemini"]
+    Pipe -- "private / fallback" --> Std["PDF text · Tesseract OCR<br/>+ rules"]
+    Gemini -. "error / limit" .-> Std
+    API -- "OAuth (PKCE)" --> IdP["Google · GitHub"]
 ```
 
 ```mermaid
 stateDiagram-v2
-    [*] --> queued: upload (schema snapshot saved)
+    [*] --> uploaded: upload (type suggested)
+    uploaded --> queued: Extract information
     queued --> processing: atomic claim
-    processing --> processing: transient error, backoff retry
-    processing --> needs_review: fields extracted
-    processing --> failed: permanent error / retries exhausted
-    needs_review --> validated: human validates
-    failed --> queued: retry
-    needs_review --> queued: re-run
-    validated --> queued: re-run (asks first)
+    processing --> needs_review: fields found
+    processing --> failed: nothing readable
+    needs_review --> validated: you validate
+    failed --> queued: try again / other type
+    needs_review --> queued: read again
 ```
 
-More detail on data flow, the security model and trade-offs:
-**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+More detail: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Tech stack
 
 | Layer | Choice |
 |---|---|
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui (Base UI), Motion, TanStack Query, React Router, Recharts |
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2, Pydantic v2 |
-| AI | Google Gemini via `google-genai` (structured JSON output), default model `gemini-3.5-flash-lite` |
-| Database | PostgreSQL on Supabase in production; SQLite locally |
-| Testing | pytest (unit + integration), Vitest + Testing Library, Playwright (E2E) + axe-core (accessibility) |
-| CI | GitHub Actions: secret scan, lint, type-check, tests on SQLite **and** Postgres, build, E2E |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui (Base UI), Motion, TanStack Query, React Router |
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2, Pydantic v2, Alembic |
+| Reading | Google Gemini (`google-genai`), pypdf, pypdfium2, Tesseract (`pytesseract`), Pillow |
+| Database | PostgreSQL on Supabase; SQLite locally |
+| Testing | pytest, Vitest + Testing Library, Playwright + axe-core |
+| CI | GitHub Actions: secret scan, lint, type-check, tests on SQLite and Postgres, accuracy benchmark, build, E2E |
 
 ## Run it locally
 
-Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+.
+Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+. Optional:
+[Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) for reading photos.
 
 ```bash
-# 1. API: http://127.0.0.1:8000  (interactive docs at /api/docs)
+# 1. API on http://127.0.0.1:8000
 cd backend
-cp .env.example .env          # optional: add GEMINI_API_KEY for real AI extraction
+cp .env.example .env          # optional: add GEMINI_API_KEY
 uv sync
 uv run uvicorn app.main:app --reload
 
-# 2. Web app: http://localhost:5173  (proxies /api to the API)
+# 2. Web app on http://localhost:5173
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and click **Explore the demo**, or create an account.
-
-### Demo mode vs. Gemini mode
-
-| | Demo mode (no key) | Gemini mode (`GEMINI_API_KEY` set) |
-|---|---|---|
-| PDFs with a text layer | Text matcher reads `Label: value` lines | Gemini reads the document |
-| Scanned PDFs and images | Fields come back empty, with a notice | Supported |
-| Token usage | Estimated (≈ 4 chars/token), marked as such in the UI | Exact counts from the API |
-| Cost | None | Billed to your Google AI account, capped by `AI_DAILY_LIMIT_*` |
-
 ## Tests
 
 ```bash
-cd backend  && uv run pytest -q                 # 59 unit + integration tests
-cd frontend && npm test                         # 12 unit/component tests
-cd frontend && npx playwright install chromium && npm run test:e2e   # 9 E2E + accessibility tests
+cd backend  && uv run pytest -q                       # 88 unit + integration tests
+cd backend  && uv run python -m scripts.benchmark     # accuracy on generated documents
+cd frontend && npm test                               # 12 unit/component tests
+cd frontend && npx playwright install chromium && npm run test:e2e   # 11 E2E + accessibility
 ```
 
-Last local run (2026-11-18): **59/59** backend on SQLite and on PostgreSQL 17,
-**12/12** frontend unit, **9/9** Playwright, type-check, lint and production build all
-passing.
-
-The backend suite runs against PostgreSQL when `TEST_DATABASE_URL` is set (CI does this).
-The E2E suite starts the real API (offline extractor, throwaway database) and the Vite dev
-server, then drives Chromium through: sign-up → upload → review → validate → CSV export;
-file rejection (including a fake PDF caught by magic bytes); auth redirects; the demo
-workspace and guided tour; re-run confirmation; forgot-password; and an axe WCAG 2.1 AA
-audit of every screen in light and dark mode.
+Last local run (2026-11-18): backend 87 passed, 1 skipped (the OCR test, because
+Tesseract is not installed on that machine; CI installs it), frontend 12/12, Playwright
+11/11, type-check, lint and build passing.
 
 ## Deploy for free
 
-Reference setup: **Supabase** (Postgres) + **Render** (API container, [`render.yaml`](render.yaml))
-+ **Vercel** (web app and `/api` proxy). All free tiers, no API key needed: the public demo
-runs on the offline extractor. Step-by-step guide with checks and troubleshooting:
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
-
-Two safeguards make a public deployment safe to leave running:
-- **Origin lock.** Vercel adds a secret header to every proxied request and the API refuses
-  anything without it, so nobody can bypass Vercel to forge client IPs or dodge limits.
-- **Cost caps.** If you add a Gemini key, `AI_DAILY_LIMIT_PER_USER` and
-  `AI_DAILY_LIMIT_GLOBAL` cap Gemini calls per UTC day, and demo visitors never use Gemini.
-
-All variables are documented in [`backend/.env.example`](backend/.env.example).
+Supabase (database) + Render (API, [`render.yaml`](render.yaml)) + Vercel (web app and
+`/api` proxy), all on free plans. Step by step, including how to create the Gemini key and
+the Google/GitHub sign-in apps: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. Every
+setting is listed in [`backend/.env.example`](backend/.env.example).
 
 ## Project structure
 
 ```
-backend/
-  app/
-    main.py              FastAPI app, middleware (origin lock), startup recovery
-    config.py            typed settings (environment variables)
-    models.py            SQLAlchemy models
-    schemas.py           Pydantic API contract
-    security.py          password hashing, JWT cookie sessions, rate limiting
-    routers/             auth (+ password reset), schemas, documents (+ export), usage, samples
-    services/            upload validation, processing pipeline, exporters, mailer
-    extraction/          provider interface, Gemini adapter, offline extractor, normalisation
-    demo/                fictional sample documents + workspace seeding
-  migrations/            Alembic migrations (run automatically on startup)
-  scripts/               sample PDF generator
-  tests/                 pytest unit and integration tests
-frontend/
-  src/
-    lib/                 typed API client, query hooks, formatting
-    components/          app shell, upload dialog, demo tour; components/ui = shadcn/ui
-    pages/               one file per route
-  e2e/                   Playwright specs, accessibility audit, screenshot/video script
-docs/
-  ARCHITECTURE.md        design, data flow, security model, limitations
-  DEPLOYMENT.md          free-tier deployment guide (Supabase + Render + Vercel)
-  LEARNING_GUIDE.md      beginner-friendly tour of the technologies and code, with exercises
-  INTERVIEW_GUIDE.md     component-by-component walkthrough and likely questions
+backend/app/
+  routers/       auth, oauth, documents (+ export), templates, usage, admin
+  services/      upload checks, processing pipeline, limits, exporters, mailer
+  extraction/    Gemini adapter, PDF text + OCR, rules, type suggestion, grounding check
+  demo/          fictional sample documents + demo workspace seeding
+backend/scripts/ sample generator, accuracy benchmark
+frontend/src/
+  pages/         landing, auth, dashboard, documents, document detail, templates, usage, admin
+  components/    app shell, upload dialog, type/mode choosers, demo tour, ui/ (shadcn)
+docs/            ARCHITECTURE, DEPLOYMENT, INTERVIEW_GUIDE, LEARNING_GUIDE
 ```
-
-## What has been verified, and what has not
-
-**Verified locally:**
-- All automated suites listed above, on SQLite and on PostgreSQL 17 (embedded server).
-- Alembic migrations on a real pre-migration database: all rows kept, new column added.
-- Real Gemini extraction, run by hand with `gemini-3.5-flash-lite`: a sample invoice PDF
-  (8/8 fields correct, including European number formats) and a PNG receipt (5/5). The
-  retry path was observed live against real 503/504 responses from the API.
-- Supabase-style RLS lock-down: the table owner sees rows, a non-owner role sees none.
-- Every screen reviewed by eye in light and dark mode at desktop and phone widths.
-
-**Verified on the live deployment** (Supabase + Render + Vercel, free tiers):
-- GitHub Actions: all five CI jobs pass on GitHub.
-- The Docker image builds and runs on Render; migrations ran against Supabase on startup.
-- Demo flow end to end at desktop and phone width: one-click workspace, sample
-  extraction, validation, CSV export.
-- Origin lock: the Render host answers `/api/health` but returns 403 for every other path
-  without the secret, including with a guessed secret; through Vercel the API works.
-- Client IPs: Render logs show the visitor's real IP, also when the request carries
-  forged `X-Forwarded-For` / `X-Real-IP` headers.
-- The session cookie is HttpOnly; no Gemini key is configured, so the demo has no AI cost.
-
-**Not verified:** password-reset email delivery through a real SMTP server (the flow is
-covered by tests with a fake mailer; without SMTP, reset is hidden in production), and
-real Gemini extraction on the deployed instance (no key is set there on purpose).
 
 ## Known limitations
 
-- Jobs run in-process (FastAPI `BackgroundTasks`). Interrupted jobs are marked failed on
-  restart and can be retried; a multi-instance deployment needs a durable queue.
-- Rate limiting is in memory and per instance; several API instances would need a shared
-  store such as Redis.
-- Sessions are stateless JWTs. A password reset revokes all of a user's sessions, but
-  logout only clears the cookie on that device.
-- Files are stored in Postgres (`bytea`, 10 MB cap). Object storage with signed URLs is the
-  scaling path.
-- Extraction fields are flat (no repeating line-item tables yet).
-- The offline demo extractor is a simple text matcher, not AI, and cannot read images.
-- No email verification on sign-up. Password reset needs SMTP in production; without it
-  the "Forgot password?" link is hidden.
+- **OCR is slow on the free server** (shared 0.1 CPU): a photo can take several seconds
+  and only the first pages of a scanned PDF are read (`OCR_MAX_PAGES`).
+- Rules read flat fields; repeating line-item tables are not extracted.
+- Gemini's free tier has small daily quotas (Google can change them); over the limit,
+  documents are read without AI.
+- Jobs run inside the API process. A restart marks running jobs failed (retry is one click).
+- Rate limits are in memory, per instance.
+- Files are stored in Postgres (10 MB cap); object storage is the scaling path.
+- Sessions are stateless JWTs; logout clears the cookie on that device only.
+- Password reset needs an SMTP server in production; without it the link is hidden.
 
 ## License
 

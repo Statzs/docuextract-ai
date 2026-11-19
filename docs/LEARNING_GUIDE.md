@@ -29,7 +29,7 @@ guide, and open each file as it is mentioned. Paths are relative to the reposito
 Browser ──HTTP/JSON──▶ API server ──SQL──▶ Database
 (React app)            (FastAPI)            (PostgreSQL / SQLite)
                            │
-                           └──▶ Gemini (AI) or the offline demo extractor
+                           └──▶ Gemini (AI) or the standard reader (no AI)
 ```
 
 - **Frontend**: the part that runs in the browser. It draws the screens and calls the API.
@@ -241,8 +241,10 @@ Errors are sorted into two kinds (`extraction/base.py`):
 - **Permanent** (bad request, invalid output): fail at once, because retrying would only
   waste money.
 
-The **offline demo extractor** (`extraction/demo.py`) is not AI. It reads the PDF's text
-and looks for `Label: value` lines. It exists so the app and its tests work with no key.
+The **standard reader** (`extraction/text.py` + `extraction/rules.py`) is not AI. It reads
+the PDF's text (or runs Tesseract OCR on photos and scans) and looks for known labels such
+as `Total` or `Invoice No.` followed by a value. It is used in private mode, for demo
+workspaces, and whenever Gemini is unavailable, so the app and its tests work with no key.
 
 ### Exercises
 

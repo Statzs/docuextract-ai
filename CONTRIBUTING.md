@@ -20,8 +20,9 @@ npm install
 npm run dev
 ```
 
-Without `GEMINI_API_KEY` the API uses the offline demo extractor, so everything works with
-no accounts or cost.
+Without `GEMINI_API_KEY` the API reads documents with PDF text, Tesseract OCR and rules, so
+everything works with no accounts or cost. Install Tesseract (with the `eng` and `spa`
+languages) to read photos locally; without it, the OCR test is skipped.
 
 > **Windows tip:** if `uv sync` fails with "DLL load failed … file name too long", the
 > project path is too deep for some wheels. Put the virtualenv somewhere short:

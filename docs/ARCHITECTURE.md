@@ -15,7 +15,8 @@ for local development and tests).
                                     │   exporter, demo_seed      │      └──────────────────┘
                                     │ extraction/ (AI providers) │
                                     │   GeminiExtractor ─────────┼────▶ Google Gemini API
-                                    │   DemoExtractor (offline)  │
+                                    │   StandardExtractor (text, │
+                                    │   OCR, rules; no AI)       │
                                     └────────────────────────────┘
 ```
 
@@ -23,16 +24,26 @@ for local development and tests).
 
 1. `POST /api/documents` (multipart). `services/files.py` validates the upload:
    size limit, magic bytes (the declared content type is ignored), PDF parseability,
-   page limit and encryption, and sanitises the filename.
-2. The document row is created with status `queued` and a **snapshot of the schema's
-   fields**, so later edits to the schema never corrupt historical results.
-3. Before queuing, `enforce_ai_quota` refuses the upload with 429 once today's per-user
-   or global Gemini budget (`AI_DAILY_LIMIT_*`) is spent.
+   page limit and encryption, image decoding and pixel limit, and sanitises the filename.
+   The daily upload cap is checked, expired documents are purged, and a file whose
+   SHA-256 the user already uploaded returns the existing document (`duplicate: true`).
+2. Without a template the document stays `uploaded` and the response carries
+   `suggested_schema_id` (`extraction/classify.py`, keyword scoring on the PDF text and the
+   filename; it only suggests when one type clearly wins).
+3. `POST /api/documents/{id}/extract {schema_id, mode}` stores a **snapshot of the
+   template's fields** (later template edits never change old results) and the mode
+   (`auto` = AI when possible, `private` = never AI), then queues the job.
 4. A FastAPI `BackgroundTask` runs `services/processing.py::process_document`:
    - atomically claims the job (`UPDATE … WHERE status = 'queued'`), so two runs of the
      same document can never both call the provider;
-   - calls the configured extractor (demo users always get the offline one); transient errors (HTTP 429/5xx, timeouts) are
-     retried with exponential backoff up to `EXTRACTION_MAX_ATTEMPTS`;
+   - decides whether AI may be used (`services/limits.py::ai_block_reason`: private mode,
+     demo user, no key, admin switch off, global or per-user daily cap). If yes, Gemini is
+     called; transient errors (HTTP 429/5xx, timeouts) are retried with exponential
+     backoff up to `EXTRACTION_MAX_ATTEMPTS`;
+   - if AI is not allowed or fails, the standard reader runs instead and the reason is
+     stored in `notes`; `provider` records the method actually used (`gemini`, `text`, `ocr`);
+   - AI values are checked against the PDF text layer (`extraction/verify.py`); values
+     that cannot be found are capped at 40 % confidence;
    - every attempt is written to `usage_events` (tokens, latency, success/error);
    - status → `needs_review` on success, `failed` (with a user-safe message) otherwise.
 5. The client polls `GET /api/documents/{id}` while the status is `queued`/`processing`.
@@ -49,8 +60,8 @@ for local development and tests).
 
 | Provider | When | How |
 |---|---|---|
-| `GeminiExtractor` | `GEMINI_API_KEY` set | Sends the raw file as an inline part with a JSON **response schema** generated from the user's fields (each field → `{value, confidence}`), `temperature=0`. |
-| `DemoExtractor` | no key (default) | Offline. Extracts the PDF text layer with `pypdf` and matches `Label: value` lines. Images return empty fields with a note (no OCR offline). Token counts are estimated (≈ chars / 4) and flagged as such in usage. |
+| `GeminiExtractor` | Smart mode, key set, quota left | Sends the raw file as an inline part with a JSON **response schema** generated from the template's fields (each field → `{value, confidence}`), `temperature=0`, and a system instruction that the document is untrusted data. |
+| `StandardExtractor` | private mode, demo users, or AI unavailable | `extraction/text.py` reads the PDF text layer with `pypdf` (layout mode keeps table columns apart). Pages with almost no text are treated as scans: rendered with `pypdfium2` at 200 dpi and read by Tesseract (eng+spa), up to `OCR_MAX_PAGES`. Images go straight to Tesseract. `extraction/rules.py` then matches label synonyms (English and Spanish) on the same line, after a separator, or on the next line, and types the value. Confidence reflects how the value was found and is lowered for OCR text. Nothing is guessed: no label, no value. |
 
 Both outputs pass through `extraction/normalize.py`, which coerces values to the
 declared field type (numbers, ISO dates, booleans) so the UI and exports see
@@ -60,17 +71,17 @@ consistent data regardless of provider.
 
 | Concern | Measure |
 |---|---|
-| Authentication | Email + password, bcrypt hashes, short-lived HS256 JWT in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` in production). The SPA never sees the token, so XSS cannot exfiltrate it. |
+| Authentication | Google and GitHub OAuth (PKCE + signed state cookie, verified-email linking) or email + password with bcrypt hashes; short-lived HS256 JWT in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` in production). The SPA never sees the token, so XSS cannot exfiltrate it. |
 | Brute force | In-memory sliding-window limits. Per IP on auth endpoints, and keyed on things a forged IP cannot change: the target account for sign-in, the email for password reset, the user for uploads, and a global cap on new accounts/demo workspaces. |
 | Client IP | `security.client_ip` uses the TCP peer by default. Proxy headers are ignored unless the origin lock is on. Behind Vercel, `CLIENT_IP_HEADER=x-forwarded-for` takes the first entry, which Vercel overwrites with the visitor IP (Render then appends its own hop, and rewrites `x-real-ip`, which is why that header is not used). |
 | Origin lock | Vercel's route transform sets `x-origin-secret` from its `ORIGIN_SECRET` environment variable on every proxied request; `main.py` returns 403 to anything else except `/api/health`. The startup check refuses `CLIENT_IP_HEADER` without a 32+ character secret. |
 | Password reset | `secrets.token_urlsafe(32)` emailed once; only its SHA-256 is stored; 30-minute expiry; single use enforced atomically; identical response for unknown emails. A successful reset bumps `users.token_version`, which is embedded in every JWT, so all existing sessions stop working. |
-| AI cost | Daily Gemini caps per user and global, counted from `usage_events` (retries count). Demo users never reach Gemini. |
+| AI cost | Daily Gemini caps per user and global, counted from `usage_events` (retries count), stored in `app_settings` and editable in the admin panel. Over a cap, documents fall back to the standard reader. Demo users never reach Gemini. |
 | Data isolation | Every query goes through helpers that filter by `user_id`; foreign IDs return **404, not 403**, to avoid leaking existence. Covered by integration tests. |
 | Upload safety | `Content-Length` checked before the body is parsed (413), then a bounded read, magic-byte sniffing (the client's content type is ignored), size/page limits, encrypted/corrupt PDF rejection, filename sanitisation. Originals are served with the sniffed type and `X-Content-Type-Options: nosniff`. |
 | Supabase Data API | Row Level Security is enabled on every table at startup with **no policies**. The backend connects as the table owner (which bypasses RLS), while Supabase's `anon`/`authenticated` roles see nothing. Verified against PostgreSQL: owner sees rows, non-owner role sees 0. |
 | CSRF | `SameSite=Lax` cookies are not sent on cross-site POST/PUT/PATCH/DELETE, and all GET endpoints are read-only. |
-| Prompt injection | Text inside a document could try to steer the model. Impact is limited: output is constrained to the JSON schema, the model has no tools, and every value goes through human review before it counts as validated. |
+| Prompt injection | Text inside a document could try to steer the model. The system instruction tells the model the document is data; output is constrained to the JSON schema; the model has no tools; values absent from the PDF text are flagged; and every value goes through human review before it counts as validated. |
 | API keys | Gemini key exists only in the backend environment. The frontend has no secrets. |
 | Export | CSV/XLSX cells beginning with `= + - @` are prefixed with `'` to prevent formula injection. |
 | Errors | Provider errors are logged server-side; users get generic messages. |
@@ -126,12 +137,13 @@ enabled only while a document is `queued`/`processing`.
   `queued`/`processing` by a restart are marked `failed` with a clear message so users can
   retry. A multi-instance deployment needs a durable queue (Postgres job table, Redis worker).
 - Rate limiting is per process and in memory.
-- The AI quota is check-then-act, so concurrent uploads can overshoot it by a few calls.
+- The AI quota is check-then-act, so concurrent extractions can overshoot it by a few calls (the extra documents simply use AI; nothing breaks).
 - Migrations run automatically on startup, which is right for a single instance; with
   several instances, run `alembic upgrade head` as a release step instead.
 - Supabase is used as managed PostgreSQL. Supabase Auth and Storage are not used,
   so a single, fully testable auth path exists locally and in production.
-- Offline demo mode cannot read images (no OCR); that requires Gemini.
+- OCR runs in the API process on a 0.1-CPU free instance: a photo takes seconds, and only the first `OCR_MAX_PAGES` pages of a scan are read. Browser-side OCR (tesseract.js) was considered and rejected: a ~10 MB download per visitor and slow on phones.
+- The rules read flat label/value fields; line-item tables are not extracted.
 - Sessions are stateless JWTs. Password reset revokes them all through `token_version`;
   logout only clears the cookie on that device.
 - `pypdf` parses untrusted PDFs in-process. Size and page limits bound the cost, but a
