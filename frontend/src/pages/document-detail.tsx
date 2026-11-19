@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { Link, useNavigate, useParams } from "react-router"
 import { AnimatePresence, motion } from "motion/react"
-import { AlertTriangle, ArrowLeft, Check, Info, Loader2, Repeat, RotateCw, Save, Sparkles, Trash2, Undo2 } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, ExternalLink, FileText, Info, Loader2, Repeat, RotateCw, Save, Sparkles, Trash2, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,6 +69,18 @@ function FieldInput({ field, value, onChange, error }: { field: FieldDef; value:
 function Preview({ doc }: { doc: DocumentDetail }) {
   const [loaded, setLoaded] = useState(false)
   const url = api.fileUrl(doc.id)
+  // Phone browsers (e.g. Android Chrome) can't show a PDF inside a page: offer it in a new tab instead of a blank box.
+  if (doc.mime_type === "application/pdf" && navigator.pdfViewerEnabled === false) {
+    return (
+      <div className="grid place-items-center gap-3 rounded-xl border bg-surface p-8 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-muted-foreground">This browser can't show the PDF next to the values.</p>
+        <Button variant="outline" render={<a href={url} target="_blank" rel="noreferrer" />} nativeButton={false}>
+          <ExternalLink /> Open the PDF
+        </Button>
+      </div>
+    )
+  }
   return (
     <div className="relative h-[50vh] min-h-[360px] overflow-hidden rounded-xl border bg-surface xl:sticky xl:top-6 xl:h-[calc(100dvh-8rem)]">
       {!loaded && <Skeleton className="absolute inset-3" />}
